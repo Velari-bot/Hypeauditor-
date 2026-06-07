@@ -7,6 +7,7 @@ import {
   formatAudienceAge,
   formatAudienceCountries,
   formatAudienceGender,
+  formatLastUpdated,
   parseIncomingPayload,
   parseInstagram,
   parseTikTok,
@@ -196,5 +197,9 @@ describe("formatters and extractors", () => {
 
   it("extracts phone from bio", () => {
     expect(extractPhone("Call +1 (212) 555-0199 today")).toBe("+1 (212) 555-0199");
+  });
+
+  it("formats last updated as an ISO timestamp for Airtable date fields", () => {
+    expect(formatLastUpdated(new Date("2026-06-07T15:28:00.000Z"))).toBe("2026-06-07T15:28:00.000Z");
   });
 });

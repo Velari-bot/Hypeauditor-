@@ -2,6 +2,11 @@ import type { Platform } from "./parser";
 import { removeUndefined } from "./parser";
 
 type NormalizedFields = Record<string, unknown>;
+type AirtableValueType = "text" | "number" | "currency" | "datetime" | "passthrough";
+type AirtableFieldConfig = {
+  airtableField: string;
+  type: AirtableValueType;
+};
 
 type AirtableTable = {
   id: string;
@@ -25,51 +30,59 @@ export type AirtableUpdateResult = {
   autoDiscoveryRan: boolean;
 };
 
-export const TIKTOK_AIRTABLE_FIELD_MAP: Record<string, string> = {
-  tiktok_username: "Tiktok Username",
-  country: "Country",
-  niche: "Niche",
-  bio: "Bio",
-  tiktok_profile_url: "TikTok Profile URL",
-  followers: "Followers",
-  avg_views: "Avg Views",
-  avg_likes: "Avg Likes",
-  total_likes: "Total Likes",
-  engagement_rate: "Engagement Rate",
-  audience_country: "Audience Country",
-  audience_gender: "Audience Gender Split",
-  audience_age: "Audience Age",
-  tiktok_rate: "Tiktok Rate",
-  tiktok_base_rate: "Tiktok Base Rate",
-  exclusivity: "Exclusivity",
-  phone_number: "Phone Number",
-  hype_auditor_profile: "HypeAuditor Profile URL",
-  last_updated: "Last Updated",
-  instagram_url: "Instagram URL",
-  instagram_rate: "Instagram Rate",
-  email: "Email",
+export const TIKTOK_AIRTABLE_FIELD_CONFIG: Record<string, AirtableFieldConfig> = {
+  tiktok_username: { airtableField: "Tiktok Username", type: "text" },
+  country: { airtableField: "Country", type: "text" },
+  niche: { airtableField: "Niche", type: "text" },
+  bio: { airtableField: "Bio", type: "text" },
+  tiktok_profile_url: { airtableField: "TikTok Profile URL", type: "text" },
+  followers: { airtableField: "Followers", type: "number" },
+  avg_views: { airtableField: "Avg Views", type: "number" },
+  avg_likes: { airtableField: "Avg Likes", type: "number" },
+  total_likes: { airtableField: "Total Likes", type: "number" },
+  engagement_rate: { airtableField: "Engagement Rate", type: "number" },
+  audience_country: { airtableField: "Audience Country", type: "text" },
+  audience_gender: { airtableField: "Audience Gender Split", type: "text" },
+  audience_age: { airtableField: "Audience Age", type: "text" },
+  tiktok_rate: { airtableField: "Tiktok Rate", type: "currency" },
+  tiktok_base_rate: { airtableField: "Tiktok Base Rate", type: "currency" },
+  exclusivity: { airtableField: "Exclusivity", type: "passthrough" },
+  phone_number: { airtableField: "Phone Number", type: "text" },
+  hype_auditor_profile: { airtableField: "HypeAuditor Profile URL", type: "text" },
+  last_updated: { airtableField: "Last Updated", type: "datetime" },
+  instagram_url: { airtableField: "Instagram URL", type: "text" },
+  instagram_rate: { airtableField: "Instagram Rate", type: "currency" },
+  email: { airtableField: "Email", type: "text" },
 };
 
-export const INSTAGRAM_AIRTABLE_FIELD_MAP: Record<string, string> = {
-  instagram_username: "Instagram Username",
-  country: "Country",
-  niche: "Niche",
-  bio: "Bio",
-  instagram_profile_url: "Instagram Profile URL",
-  followers: "Followers",
-  avg_views: "Avg Views",
-  average_likes: "Average Likes",
-  total_likes: "Total Likes",
-  engagement_rate: "Engagement Rate",
-  audience_country: "Audience Country",
-  audience_gender: "Audience Gender Split",
-  audience_age: "Audience Age",
-  instagram_rate: "Instagram Rate",
-  exclusivity: "Exclusivity",
-  phone_number: "Phone Number",
-  hype_auditor_profile: "HypeAuditor Profile URL",
-  last_updated: "Last Updated Timestamp",
+export const INSTAGRAM_AIRTABLE_FIELD_CONFIG: Record<string, AirtableFieldConfig> = {
+  instagram_username: { airtableField: "Instagram Username", type: "text" },
+  country: { airtableField: "Country", type: "text" },
+  niche: { airtableField: "Niche", type: "text" },
+  bio: { airtableField: "Bio", type: "text" },
+  instagram_profile_url: { airtableField: "Instagram Profile URL", type: "text" },
+  followers: { airtableField: "Followers", type: "number" },
+  avg_views: { airtableField: "Avg Views", type: "number" },
+  average_likes: { airtableField: "Average Likes", type: "number" },
+  total_likes: { airtableField: "Total Likes", type: "number" },
+  engagement_rate: { airtableField: "Engagement Rate", type: "number" },
+  audience_country: { airtableField: "Audience Country", type: "text" },
+  audience_gender: { airtableField: "Audience Gender Split", type: "text" },
+  audience_age: { airtableField: "Audience Age", type: "text" },
+  instagram_rate: { airtableField: "Instagram Rate", type: "currency" },
+  exclusivity: { airtableField: "Exclusivity", type: "passthrough" },
+  phone_number: { airtableField: "Phone Number", type: "text" },
+  hype_auditor_profile: { airtableField: "HypeAuditor Profile URL", type: "text" },
+  last_updated: { airtableField: "Last Updated Timestamp", type: "datetime" },
 };
+
+export const TIKTOK_AIRTABLE_FIELD_MAP = Object.fromEntries(
+  Object.entries(TIKTOK_AIRTABLE_FIELD_CONFIG).map(([key, config]) => [key, config.airtableField]),
+);
+
+export const INSTAGRAM_AIRTABLE_FIELD_MAP = Object.fromEntries(
+  Object.entries(INSTAGRAM_AIRTABLE_FIELD_CONFIG).map(([key, config]) => [key, config.airtableField]),
+);
 
 export class AirtableUpdateError extends Error {
   status: number;
@@ -105,11 +118,11 @@ export class AirtableUpdateError extends Error {
 }
 
 export function mapToAirtableFields(fields: NormalizedFields, platform: Platform): NormalizedFields {
-  const map = platform === "tiktok" ? TIKTOK_AIRTABLE_FIELD_MAP : INSTAGRAM_AIRTABLE_FIELD_MAP;
+  const config = platform === "tiktok" ? TIKTOK_AIRTABLE_FIELD_CONFIG : INSTAGRAM_AIRTABLE_FIELD_CONFIG;
   const mapped = Object.fromEntries(
     Object.entries(fields)
-      .filter(([key]) => key in map)
-      .map(([key, value]) => [map[key], value]),
+      .filter(([key]) => key in config)
+      .map(([key, value]) => [config[key].airtableField, coerceForAirtable(value, config[key].type)]),
   );
 
   return removeUndefined(mapped);
@@ -145,7 +158,7 @@ export async function updateAirtable({
     platform,
     recordId,
     normalizedFieldKeys: Object.keys(fields),
-    mappedAirtableFieldKeys: Object.keys(airtableFields),
+    mappedAirtableFields: previewAirtableFields(fields, platform, airtableFields),
   });
   const target = { apiKey, baseId, configuredTableId, initialTableId };
   const firstAttempt = await patchRecord(target, recordId, airtableFields, initialTableId);
@@ -412,4 +425,57 @@ function logAirtableFailure({
     autoDiscoveryRan,
     responseBody,
   });
+}
+
+function coerceForAirtable(value: unknown, type: AirtableValueType): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || value === "") {
+    return null;
+  }
+
+  if (type === "number" || type === "currency") {
+    const number = Number(String(value).replace(/[$,%\s,]/g, ""));
+    return Number.isFinite(number) ? number : null;
+  }
+
+  if (type === "datetime") {
+    const date = value instanceof Date ? value : new Date(String(value));
+    return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+  }
+
+  if (type === "text") {
+    return String(value);
+  }
+
+  return value;
+}
+
+function previewAirtableFields(fields: NormalizedFields, platform: Platform, airtableFields: NormalizedFields) {
+  const config = platform === "tiktok" ? TIKTOK_AIRTABLE_FIELD_CONFIG : INSTAGRAM_AIRTABLE_FIELD_CONFIG;
+
+  return Object.entries(fields)
+    .filter(([key]) => key in config)
+    .map(([key]) => {
+      const fieldConfig = config[key];
+      const value = airtableFields[fieldConfig.airtableField];
+      return {
+        normalizedKey: key,
+        airtableField: fieldConfig.airtableField,
+        type: fieldConfig.type,
+        valueType: value === null ? "null" : typeof value,
+        valuePreview: previewValue(value),
+      };
+    });
+}
+
+function previewValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  const text = String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }

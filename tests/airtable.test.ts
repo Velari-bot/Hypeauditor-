@@ -77,6 +77,25 @@ describe("mapToAirtableFields", () => {
     expect(mapped).not.toHaveProperty("hype_auditor_profile");
   });
 
+  it("coerces Airtable values by configured field type", () => {
+    expect(
+      mapToAirtableFields(
+        {
+          followers: "124,700,000",
+          tiktok_rate: "$204139.00",
+          last_updated: "2026-06-07T15:28:00.000Z",
+          bio: 12345,
+        },
+        "tiktok",
+      ),
+    ).toEqual({
+      Followers: 124700000,
+      "Tiktok Rate": 204139,
+      "Last Updated": "2026-06-07T15:28:00.000Z",
+      Bio: "12345",
+    });
+  });
+
   it("sends the expected Airtable PATCH body", async () => {
     process.env.AIRTABLE_API_KEY = "key";
     process.env.TIKTOK_AIRTABLE_BASE_ID = "base";

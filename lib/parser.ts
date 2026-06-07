@@ -279,17 +279,7 @@ export function formatCurrency(value: unknown): string | null {
 }
 
 export function formatLastUpdated(date = new Date()): string {
-  return date
-    .toLocaleString("en-US", {
-      month: "numeric",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    })
-    .replace(" AM", "am")
-    .replace(" PM", "pm");
+  return date.toISOString();
 }
 
 export function removeUndefined<T extends UnknownRecord>(obj: T): T {
