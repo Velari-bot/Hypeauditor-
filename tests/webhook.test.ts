@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import tiktokSample from "../fixtures/tiktok-hypeauditor-sample.json";
 import instagramSample from "../fixtures/instagram-hypeauditor-sample.json";
 import { POST } from "../app/api/webhooks/hypeauditor/route";
+import { POST as DEBUG_PARSE_POST } from "../app/api/debug/parse/route";
 
 const originalEnv = { ...process.env };
 
@@ -154,7 +155,49 @@ describe("POST /api/webhooks/hypeauditor", () => {
       success: false,
       error: "Parsed Instagram payload produced no usable fields",
       debug: {
-        reportPath: "result.report",
+        bodyKeys: expect.arrayContaining(["recordId", "platform", "hypeauditorData"]),
+        hypeauditorDataKeys: expect.arrayContaining(["result"]),
+        reportFound: true,
+        checkedReportPaths: expect.arrayContaining(["raw.result.report", "raw.output.result.report"]),
+        reportPath: "raw.result.report",
+        reportKeys: expect.arrayContaining(["basic", "metrics", "features"]),
+        basicKeys: [],
+        metricsKeys: [],
+        featuresKeys: [],
+        samplePreview: expect.stringContaining("report_state"),
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("debug parse endpoint returns parsed and debug info without Airtable", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await DEBUG_PARSE_POST(
+      new NextRequest("http://localhost/api/debug/parse", {
+        method: "POST",
+        headers: new Headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          platform: "instagram",
+          hypeauditorData: {
+            output: instagramSample,
+          },
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      platform: "instagram",
+      parsed: {
+        instagram_username: "examplecreator",
+      },
+      debug: {
+        reportFound: true,
+        foundPath: "raw.output.result.report",
       },
     });
     expect(fetchMock).not.toHaveBeenCalled();

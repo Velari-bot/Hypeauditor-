@@ -68,9 +68,26 @@ const PAYLOAD_KEYS = [
   "hypeAuditorData",
   "data",
   "result",
+  "output",
+  "response",
   "payload",
   "raw",
   "body",
+];
+
+export const CHECKED_REPORT_PATHS = [
+  "raw.result.report",
+  "raw.report",
+  "raw.data.result.report",
+  "raw.data.report",
+  "raw.output.result.report",
+  "raw.output.report",
+  "raw.response.result.report",
+  "raw.response.report",
+  "raw.body.result.report",
+  "raw.body.report",
+  "raw.hypeauditorData.result.report",
+  "raw.hypeauditorData.report",
 ];
 
 const THEMATIC_MAP: Record<string, string> = {
@@ -141,9 +158,9 @@ export function normalizeHypeAuditorPayload(raw: unknown): unknown {
 export function parseTikTok(raw: unknown, options: { inputUsername?: string | null } = {}): TikTokFields {
   const parsed = normalizeHypeAuditorPayload(raw);
   const report = getReport(parsed);
-  const basic = asRecord(report.basic);
+  const basic = asRecord(report.basic ?? report.user);
   const metrics = asRecord(report.metrics);
-  const features = asRecord(report.features);
+  const features = asRecord(report.features ?? report.audience);
   const username = cleanUsername(toCleanString(basic.username)) ?? cleanUsername(options.inputUsername ?? null);
   const bio = toCleanString(basic.description);
   const email = extractEmail(bio) ?? extractEmail(firstArrayValue(valueAt(features, ["blogger_emails", "data"])));
@@ -177,9 +194,9 @@ export function parseTikTok(raw: unknown, options: { inputUsername?: string | nu
 export function parseInstagram(raw: unknown, options: { inputUsername?: string | null } = {}): InstagramFields {
   const parsed = normalizeHypeAuditorPayload(raw);
   const report = getReport(parsed);
-  const basic = asRecord(report.basic);
+  const basic = asRecord(report.basic ?? report.user);
   const metrics = asRecord(report.metrics);
-  const features = asRecord(report.features);
+  const features = asRecord(report.features ?? report.audience);
   const username = cleanUsername(toCleanString(basic.username)) ?? cleanUsername(options.inputUsername ?? null);
   const bio = toCleanString(basic.description);
 
@@ -295,20 +312,33 @@ export function removeUndefined<T extends UnknownRecord>(obj: T): T {
 
 export function getReport(raw: unknown): UnknownRecord {
   const parsed = asRecord(normalizeHypeAuditorPayload(raw));
-  const candidates = [
-    valueAt(parsed, ["result", "report"]),
-    parsed.report,
-    valueAt(parsed, ["data", "result", "report"]),
-    valueAt(parsed, ["data", "report"]),
+  return findHypeAuditorReport(parsed).report ?? {};
+}
+
+export function findHypeAuditorReport(raw: unknown): { report: UnknownRecord | null; foundPath: string | null } {
+  const parsed = asRecord(normalizeShallow(raw));
+  const candidates: Array<[string, unknown]> = [
+    ["raw.result.report", valueAt(parsed, ["result", "report"])],
+    ["raw.report", parsed.report],
+    ["raw.data.result.report", valueAt(parsed, ["data", "result", "report"])],
+    ["raw.data.report", valueAt(parsed, ["data", "report"])],
+    ["raw.output.result.report", valueAt(parsed, ["output", "result", "report"])],
+    ["raw.output.report", valueAt(parsed, ["output", "report"])],
+    ["raw.response.result.report", valueAt(parsed, ["response", "result", "report"])],
+    ["raw.response.report", valueAt(parsed, ["response", "report"])],
+    ["raw.body.result.report", valueAt(parsed, ["body", "result", "report"])],
+    ["raw.body.report", valueAt(parsed, ["body", "report"])],
+    ["raw.hypeauditorData.result.report", valueAt(parsed, ["hypeauditorData", "result", "report"])],
+    ["raw.hypeauditorData.report", valueAt(parsed, ["hypeauditorData", "report"])],
   ];
 
-  for (const candidate of candidates) {
-    if (isRecord(candidate)) {
-      return candidate;
+  for (const [path, candidate] of candidates) {
+    if (isReportObject(candidate)) {
+      return { report: asRecord(candidate), foundPath: path };
     }
   }
 
-  return {};
+  return findReportRecursive(parsed);
 }
 
 export function getReportState(raw: unknown): string | null {
@@ -317,38 +347,57 @@ export function getReportState(raw: unknown): string | null {
     toCleanString(valueAt(parsed, ["result", "report_state"])) ??
     toCleanString(parsed.report_state) ??
     toCleanString(valueAt(parsed, ["data", "result", "report_state"])) ??
-    toCleanString(valueAt(parsed, ["data", "report_state"]))
+    toCleanString(valueAt(parsed, ["data", "report_state"])) ??
+    toCleanString(valueAt(parsed, ["output", "result", "report_state"])) ??
+    toCleanString(valueAt(parsed, ["output", "report_state"])) ??
+    toCleanString(valueAt(parsed, ["response", "result", "report_state"])) ??
+    toCleanString(valueAt(parsed, ["response", "report_state"])) ??
+    toCleanString(valueAt(parsed, ["body", "result", "report_state"])) ??
+    toCleanString(valueAt(parsed, ["body", "report_state"]))
   );
 }
 
 export function getPayloadDebugInfo(raw: unknown) {
   const parsed = asRecord(normalizeHypeAuditorPayload(raw));
-  const reportPath = findReportPath(parsed);
-  const report = getReport(parsed);
-  const basic = asRecord(report.basic);
-  const metrics = asRecord(report.metrics);
-  const features = asRecord(report.features);
+  const { report, foundPath } = findHypeAuditorReport(parsed);
+  const safeReport = report ?? {};
+  const basic = asRecord(safeReport.basic ?? safeReport.user);
+  const metrics = asRecord(safeReport.metrics);
+  const features = asRecord(safeReport.features ?? safeReport.audience);
 
   return {
     topLevelKeys: Object.keys(parsed),
-    reportPath,
+    hypeauditorDataKeys: Object.keys(parsed),
+    reportFound: Boolean(report),
+    checkedReportPaths: CHECKED_REPORT_PATHS,
+    reportPath: foundPath,
+    foundPath,
     report_state: getReportState(parsed),
+    reportKeys: Object.keys(safeReport),
+    basicKeys: Object.keys(basic),
+    metricsKeys: Object.keys(metrics),
+    featuresKeys: Object.keys(features),
     basicUsername: toCleanString(basic.username),
     basicDescriptionPresent: Boolean(toCleanString(basic.description)),
-    metricKeys: Object.keys(metrics),
-    featureKeys: Object.keys(features),
+    samplePreview: previewJson(raw),
   };
 }
 
-function findReportPath(parsed: UnknownRecord): string | null {
-  const candidates: Array<[string, unknown]> = [
-    ["result.report", valueAt(parsed, ["result", "report"])],
-    ["report", parsed.report],
-    ["data.result.report", valueAt(parsed, ["data", "result", "report"])],
-    ["data.report", valueAt(parsed, ["data", "report"])],
-  ];
+export function getWebhookPayloadDebugInfo(reqBody: unknown, hypeauditorData: unknown) {
+  const body = asRecord(normalizeShallow(reqBody));
+  const hypeauditor = normalizeHypeAuditorPayload(hypeauditorData);
+  const parsedHypeauditor = asRecord(hypeauditor);
+  const debug = getPayloadDebugInfo(hypeauditor);
 
-  return candidates.find(([, candidate]) => isRecord(candidate))?.[0] ?? null;
+  return {
+    ...debug,
+    bodyKeys: Object.keys(body),
+    bodyTopLevelKeys: Object.keys(body),
+    topLevelKeys: Object.keys(body),
+    hypeauditorDataKeys: Object.keys(parsedHypeauditor),
+    hypeauditorTopLevelKeys: debug.topLevelKeys,
+    samplePreview: previewJson(hypeauditorData),
+  };
 }
 
 function findPayloadCandidate(body: UnknownRecord): unknown {
@@ -391,13 +440,60 @@ function parseJsonDeep(value: unknown, label: string): unknown {
 }
 
 function hasReportShape(value: unknown): boolean {
+  return Boolean(findHypeAuditorReport(value).report);
+}
+
+function findReportRecursive(value: unknown, path = "raw", depth = 0): { report: UnknownRecord | null; foundPath: string | null } {
+  if (depth > 5) {
+    return { report: null, foundPath: null };
+  }
+
+  if (isReportObject(value)) {
+    return { report: asRecord(value), foundPath: path };
+  }
+
+  if (!isRecord(value)) {
+    return { report: null, foundPath: null };
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    const found = findReportRecursive(normalizeShallow(nested), `${path}.${key}`, depth + 1);
+    if (found.report) {
+      return found;
+    }
+  }
+
+  return { report: null, foundPath: null };
+}
+
+function isReportObject(value: unknown): boolean {
   const record = asRecord(value);
   return Boolean(
-    valueAt(record, ["result", "report"]) ||
-      record.report ||
-      valueAt(record, ["data", "result", "report"]) ||
-      valueAt(record, ["data", "report"]),
+    (isRecord(record.basic) && isRecord(record.metrics) && isRecord(record.features)) ||
+      (isRecord(record.user) && isRecord(record.metrics) && isRecord(record.audience)),
   );
+}
+
+function normalizeShallow(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function previewJson(value: unknown, limit = 3000): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return text.length > limit ? `${text.slice(0, limit)}...` : text;
 }
 
 function findConnectedInstagramUrl(socialNetworks: unknown, currentUsername: string | null): string | null {

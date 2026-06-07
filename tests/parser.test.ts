@@ -12,6 +12,8 @@ import {
   parseInstagram,
   parseTikTok,
   PayloadParseError,
+  findHypeAuditorReport,
+  getPayloadDebugInfo,
 } from "../lib/parser";
 
 describe("parseIncomingPayload", () => {
@@ -110,6 +112,19 @@ describe("parseIncomingPayload", () => {
     expect(parseTikTok(parsed.raw).tiktok_username).toBe("mrbeast");
   });
 
+  it("supports report nested under output.result.report", () => {
+    const parsed = parseIncomingPayload({
+      recordId: "rec123",
+      platform: "instagram",
+      hypeauditorData: {
+        output: instagramSample,
+      },
+    });
+
+    expect(parseInstagram(parsed.raw).instagram_username).toBe("examplecreator");
+    expect(getPayloadDebugInfo(parsed.raw).foundPath).toBe("raw.output.result.report");
+  });
+
   it("throws a helpful error for invalid JSON strings", () => {
     expect(() => parseIncomingPayload('{"recordId": "rec123",')).toThrow(PayloadParseError);
     expect(() => parseIncomingPayload({ hypeauditorData: '{"result": ' })).toThrow(/Invalid JSON/);
@@ -185,6 +200,19 @@ describe("creator parsers", () => {
 
     expect(parsed.instagram_username).toBe("backupgram");
     expect(parsed.instagram_profile_url).toBe("https://www.instagram.com/backupgram/");
+  });
+
+  it("recursively finds a report object inside unknown wrappers", () => {
+    const found = findHypeAuditorReport({
+      wrapper: {
+        inner: {
+          final: instagramSample.result.report,
+        },
+      },
+    });
+
+    expect(found.foundPath).toBe("raw.wrapper.inner.final");
+    expect(found.report?.basic).toBeTruthy();
   });
 });
 

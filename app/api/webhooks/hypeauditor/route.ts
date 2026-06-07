@@ -9,7 +9,7 @@ import {
 } from "../../../../lib/airtable";
 import {
   getReportState,
-  getPayloadDebugInfo,
+  getWebhookPayloadDebugInfo,
   PayloadParseError,
   parseIncomingPayload,
   parseInstagram,
@@ -69,11 +69,24 @@ export async function POST(request: NextRequest) {
     const configuredAirtableTarget = getConfiguredAirtableTarget(parsedInput.platform);
 
     if (parsedInput.platform === "instagram" && countUsableFields(normalized) < 2) {
+      const debug = getWebhookPayloadDebugInfo(requestBody, parsedInput.raw);
+      console.log("INSTAGRAM PAYLOAD DEBUG", {
+        recordId: parsedInput.recordId,
+        bodyKeys: debug.bodyKeys,
+        hypeauditorDataKeys: debug.hypeauditorDataKeys,
+        reportFound: debug.reportFound,
+        foundPath: debug.foundPath,
+        reportKeys: debug.reportKeys,
+        basicKeys: debug.basicKeys,
+        metricsKeys: debug.metricsKeys,
+        featuresKeys: debug.featuresKeys,
+      });
+
       return NextResponse.json(
         {
           success: false,
           error: "Parsed Instagram payload produced no usable fields",
-          debug: getPayloadDebugInfo(parsedInput.raw),
+          debug,
           parsed: normalized,
         },
         { status: 422 },
