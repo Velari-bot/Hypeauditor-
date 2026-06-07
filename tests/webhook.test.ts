@@ -34,7 +34,7 @@ describe("POST /api/webhooks/hypeauditor", () => {
         email: "contact@mrbeastbusiness.com",
       },
     });
-    expect(body.updatedFields).toContain("tiktok_username");
+    expect(body.updatedFields).toContain("Tiktok Username");
     expect(body.airtableTarget).toMatchObject({
       configuredTableId: "table",
       initialTableId: "table",
@@ -67,7 +67,7 @@ describe("POST /api/webhooks/hypeauditor", () => {
         average_likes: 8500,
       },
     });
-    expect(body.updatedFields).toContain("instagram_username");
+    expect(body.updatedFields).toContain("Instagram Username");
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -159,15 +159,15 @@ describe("POST /api/webhooks/hypeauditor", () => {
       username: "mrbeast",
       airtableBody: {
         fields: {
-          tiktok_username: "mrbeast",
-          email: "contact@mrbeastbusiness.com",
+          "Tiktok Username": "mrbeast",
+          Email: "contact@mrbeastbusiness.com",
         },
       },
       parsed: {
         tiktok_username: "mrbeast",
       },
     });
-    expect(body.updatedFields).toContain("tiktok_username");
+    expect(body.updatedFields).toContain("Tiktok Username");
     expect(body.airtableTarget).toMatchObject({
       configuredTableId: "table",
       incomingTableOverride: null,

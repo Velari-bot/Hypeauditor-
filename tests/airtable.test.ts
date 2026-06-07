@@ -20,8 +20,8 @@ describe("mapToAirtableFields", () => {
         "tiktok",
       ),
     ).toEqual({
-      tiktok_username: "mrbeast",
-      avg_likes: 520100,
+      "Tiktok Username": "mrbeast",
+      "Avg Likes": 520100,
     });
   });
 
@@ -36,8 +36,8 @@ describe("mapToAirtableFields", () => {
         "instagram",
       ),
     ).toEqual({
-      instagram_username: "creatorgram",
-      average_likes: 12300,
+      "Instagram Username": "creatorgram",
+      "Average Likes": 12300,
     });
   });
 
@@ -52,9 +52,29 @@ describe("mapToAirtableFields", () => {
         "tiktok",
       ),
     ).toEqual({
-      tiktok_username: "mrbeast",
-      email: null,
+      "Tiktok Username": "mrbeast",
+      Email: null,
     });
+  });
+
+  it("does not send normalized snake_case keys to Airtable", () => {
+    const mapped = mapToAirtableFields(
+      {
+        tiktok_username: "mrbeast",
+        audience_gender: "Male 60% / Female 40%",
+        hype_auditor_profile: "https://hypeauditor.com/tiktok/mrbeast/",
+      },
+      "tiktok",
+    );
+
+    expect(mapped).toEqual({
+      "Tiktok Username": "mrbeast",
+      "Audience Gender Split": "Male 60% / Female 40%",
+      "HypeAuditor Profile URL": "https://hypeauditor.com/tiktok/mrbeast/",
+    });
+    expect(mapped).not.toHaveProperty("tiktok_username");
+    expect(mapped).not.toHaveProperty("audience_gender");
+    expect(mapped).not.toHaveProperty("hype_auditor_profile");
   });
 
   it("sends the expected Airtable PATCH body", async () => {
@@ -81,8 +101,8 @@ describe("mapToAirtableFields", () => {
         method: "PATCH",
         body: JSON.stringify({
           fields: {
-            tiktok_username: "mrbeast",
-            email: null,
+            "Tiktok Username": "mrbeast",
+            Email: null,
           },
         }),
       }),
