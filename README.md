@@ -47,6 +47,26 @@ https://your-vercel-domain.vercel.app/api/webhooks/hypeauditor
 
 The server also supports HypeAuditor data under `hypeAuditorData`, `data`, `result`, `payload`, `raw`, `body`, or as the full request body.
 
+### Zapier Record ID
+
+The `recordId` / `recordID` value must come from the Airtable step that creates or finds the exact record the webhook should update.
+
+For TikTok:
+
+```text
+platform = tiktok
+recordID = Airtable ID from Beyond Vision Creator Database -> Link
+```
+
+For Instagram:
+
+```text
+platform = instagram
+recordID = Airtable ID from BV Creator Database (5/2) -> Instagram
+```
+
+Do not map `recordID` from HypeAuditor, Formatter, Webhooks, or an Airtable step from a different base. If Airtable returns `Record ID was not found in any table`, the record ID is from the wrong Zapier step or wrong Airtable base.
+
 ## Local Development
 
 Install dependencies:
@@ -135,6 +155,24 @@ curl -X POST 'http://localhost:3000/api/webhooks/hypeauditor?dryRun=true' \
 ```
 
 To verify the Airtable body before connecting Zapier, run the server locally, send a `dryRun=true` request, and inspect `airtableBody.fields` in the JSON response. No Airtable request is made in dry-run mode.
+
+## Airtable Debugging
+
+The debug endpoint is protected by the same `x-webhook-secret` header:
+
+```bash
+curl -H 'x-webhook-secret: your-secret' \
+  'https://your-domain.up.railway.app/api/debug/airtable?platform=tiktok&recordId=recXXXXXXXXXXXXXX'
+```
+
+To find which accessible Airtable base/table owns a record ID, add `searchAllBases=true`:
+
+```bash
+curl -H 'x-webhook-secret: your-secret' \
+  'https://your-domain.up.railway.app/api/debug/airtable?recordId=recXXXXXXXXXXXXXX&searchAllBases=true'
+```
+
+If `recordLocator.matches` is empty, Zapier is not sending an Airtable record ID that the token can access. If it finds a base/table different from the configured platform table, remap Zapier `recordID` to the right Airtable step or update the Railway base/table variables.
 
 ## Example Request
 
