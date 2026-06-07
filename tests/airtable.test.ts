@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mapToAirtableFields, updateAirtable } from "../lib/airtable";
+import { mapToAirtableFields, removeEmptyValues, updateAirtable } from "../lib/airtable";
 
 const originalEnv = { ...process.env };
 
@@ -96,6 +96,24 @@ describe("mapToAirtableFields", () => {
     });
   });
 
+  it("removes empty values while keeping 0 and false", () => {
+    expect(
+      removeEmptyValues({
+        Null: null,
+        Undefined: undefined,
+        EmptyString: "",
+        EmptyArray: [],
+        Zero: 0,
+        False: false,
+        Text: "value",
+      }),
+    ).toEqual({
+      Zero: 0,
+      False: false,
+      Text: "value",
+    });
+  });
+
   it("sends the expected Airtable PATCH body", async () => {
     process.env.AIRTABLE_API_KEY = "key";
     process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
@@ -122,7 +140,6 @@ describe("mapToAirtableFields", () => {
         body: JSON.stringify({
           fields: {
             "Tiktok Username": "mrbeast",
-            Email: null,
           },
         }),
       }),
@@ -348,6 +365,100 @@ describe("mapToAirtableFields", () => {
       }),
     ).rejects.toThrow('Airtable field "Followers" is not writable.');
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not clear an existing TikTok username when normalized username is null", async () => {
+    process.env.AIRTABLE_API_KEY = "key";
+    process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
+    process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "rec123", fields: { "Tiktok Username": "existingcreator" } }))
+      .mockResolvedValueOnce(tablesResponse([{ id: "table", name: "Link" }]))
+      .mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateAirtable({
+      platform: "tiktok",
+      recordId: "rec123",
+      fields: { tiktok_username: null, bio: "New bio" },
+    });
+
+    expect(result.airtableFields).toEqual({
+      "Tiktok Username": "existingcreator",
+      Bio: "New bio",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://api.airtable.com/v0/base/table/rec123",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ fields: { "Tiktok Username": "existingcreator", Bio: "New bio" } }),
+      }),
+    );
+  });
+
+  it("does not clear an existing TikTok username when normalized username is empty", async () => {
+    process.env.AIRTABLE_API_KEY = "key";
+    process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
+    process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "rec123", fields: { "Tiktok Username": "existingcreator" } }))
+      .mockResolvedValueOnce(tablesResponse([{ id: "table", name: "Link" }]))
+      .mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateAirtable({
+      platform: "tiktok",
+      recordId: "rec123",
+      fields: { tiktok_username: "", bio: "New bio" },
+    });
+
+    expect(result.airtableFields["Tiktok Username"]).toBe("existingcreator");
+  });
+
+  it("returns a helpful error when no non-empty Airtable fields remain", async () => {
+    process.env.AIRTABLE_API_KEY = "key";
+    process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
+    process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "rec123", fields: {} }))
+      .mockResolvedValueOnce(tablesResponse([{ id: "table", name: "Link" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateAirtable({
+        platform: "tiktok",
+        recordId: "rec123",
+        fields: { tiktok_username: null, email: null },
+      }),
+    ).rejects.toThrow("No non-empty Airtable fields to update");
+  });
+
+  it("allows null clearing only when ALLOW_CLEARING_AIRTABLE_FIELDS is true", async () => {
+    process.env.AIRTABLE_API_KEY = "key";
+    process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
+    process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
+    process.env.ALLOW_CLEARING_AIRTABLE_FIELDS = "true";
+    const fetchMock = vi.fn().mockResolvedValueOnce(tablesResponse([{ id: "table", name: "Link" }])).mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateAirtable({
+      platform: "tiktok",
+      recordId: "rec123",
+      fields: { tiktok_username: null },
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.airtable.com/v0/base/table/rec123",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ fields: { "Tiktok Username": null } }),
+      }),
+    );
   });
 });
 

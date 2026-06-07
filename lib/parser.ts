@@ -6,6 +6,7 @@ export type ParsedIncomingPayload = {
   recordId: string | null;
   platform: Platform | null;
   airtableTableId: string | null;
+  inputUsername: string | null;
   raw: unknown;
 };
 
@@ -104,12 +105,18 @@ export function parseIncomingPayload(reqBody: unknown): ParsedIncomingPayload {
     toCleanString(bodyObject.airtableTableId) ??
     toCleanString(bodyObject.tableId) ??
     toCleanString(bodyObject.airtable_table_id);
+  const inputUsername =
+    cleanUsername(toCleanString(bodyObject.inputUsername)) ??
+    cleanUsername(toCleanString(bodyObject.username)) ??
+    cleanUsername(toCleanString(bodyObject.handle)) ??
+    cleanUsername(toCleanString(bodyObject.creatorUsername));
   const raw = findPayloadCandidate(bodyObject) ?? body;
 
   return {
     recordId,
     platform,
     airtableTableId,
+    inputUsername,
     raw: normalizeHypeAuditorPayload(raw),
   };
 }
@@ -131,13 +138,13 @@ export function normalizeHypeAuditorPayload(raw: unknown): unknown {
   return parsed;
 }
 
-export function parseTikTok(raw: unknown): TikTokFields {
+export function parseTikTok(raw: unknown, options: { inputUsername?: string | null } = {}): TikTokFields {
   const parsed = normalizeHypeAuditorPayload(raw);
   const report = getReport(parsed);
   const basic = asRecord(report.basic);
   const metrics = asRecord(report.metrics);
   const features = asRecord(report.features);
-  const username = cleanUsername(toCleanString(basic.username));
+  const username = cleanUsername(toCleanString(basic.username)) ?? cleanUsername(options.inputUsername ?? null);
   const bio = toCleanString(basic.description);
   const email = extractEmail(bio) ?? extractEmail(firstArrayValue(valueAt(features, ["blogger_emails", "data"])));
 
@@ -167,13 +174,13 @@ export function parseTikTok(raw: unknown): TikTokFields {
   }) as TikTokFields;
 }
 
-export function parseInstagram(raw: unknown): InstagramFields {
+export function parseInstagram(raw: unknown, options: { inputUsername?: string | null } = {}): InstagramFields {
   const parsed = normalizeHypeAuditorPayload(raw);
   const report = getReport(parsed);
   const basic = asRecord(report.basic);
   const metrics = asRecord(report.metrics);
   const features = asRecord(report.features);
-  const username = cleanUsername(toCleanString(basic.username));
+  const username = cleanUsername(toCleanString(basic.username)) ?? cleanUsername(options.inputUsername ?? null);
   const bio = toCleanString(basic.description);
 
   return removeUndefined({

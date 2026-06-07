@@ -55,7 +55,9 @@ export async function POST(request: NextRequest) {
   try {
     const dryRun = request.nextUrl.searchParams.get("dryRun") === "true";
     const normalized =
-      parsedInput.platform === "tiktok" ? parseTikTok(parsedInput.raw) : parseInstagram(parsedInput.raw);
+      parsedInput.platform === "tiktok"
+        ? parseTikTok(parsedInput.raw, { inputUsername: parsedInput.inputUsername })
+        : parseInstagram(parsedInput.raw, { inputUsername: parsedInput.inputUsername });
     const username = getUsername(normalized, parsedInput.platform);
     const reportState = getReportState(parsedInput.raw);
     const warnings = reportState && reportState !== "READY" ? [`HypeAuditor report_state is ${reportState}.`] : [];

@@ -58,6 +58,25 @@ describe("parseIncomingPayload", () => {
     expect(parsed.recordId).toBe("recZapier123");
   });
 
+  it("extracts optional input username fallback keys", () => {
+    expect(
+      parseIncomingPayload({
+        recordId: "rec123",
+        platform: "tiktok",
+        inputUsername: "@fallback_creator",
+        hypeauditorData: tiktokSample,
+      }).inputUsername,
+    ).toBe("fallback_creator");
+    expect(
+      parseIncomingPayload({
+        recordId: "rec123",
+        platform: "instagram",
+        creatorUsername: "creatorgram",
+        hypeauditorData: instagramSample,
+      }).inputUsername,
+    ).toBe("creatorgram");
+  });
+
   it("accepts Airtable table override keys", () => {
     expect(
       parseIncomingPayload({
@@ -152,6 +171,20 @@ describe("creator parsers", () => {
     expect(parsed.followers).toBeNull();
     expect(parsed.audience_country).toBeNull();
     expect(parsed.exclusivity).toBeNull();
+  });
+
+  it("uses inputUsername when TikTok basic username is missing", () => {
+    const parsed = parseTikTok({ result: { report_state: "READY", report: { basic: {} } } }, { inputUsername: "@backup" });
+
+    expect(parsed.tiktok_username).toBe("backup");
+    expect(parsed.tiktok_profile_url).toBe("https://www.tiktok.com/@backup");
+  });
+
+  it("uses inputUsername when Instagram basic username is missing", () => {
+    const parsed = parseInstagram({ result: { report_state: "READY", report: { basic: {} } } }, { inputUsername: "backupgram" });
+
+    expect(parsed.instagram_username).toBe("backupgram");
+    expect(parsed.instagram_profile_url).toBe("https://www.instagram.com/backupgram/");
   });
 });
 

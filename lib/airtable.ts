@@ -35,6 +35,13 @@ type AirtableTarget = {
   initialTableId: string;
 };
 
+type PatchAttempt = {
+  response: Response;
+  body: unknown;
+  airtableFields: NormalizedFields;
+  skippedFields: SkippedAirtableField[];
+};
+
 export type AirtableUpdateResult = {
   airtableFields: NormalizedFields;
   responseBody: unknown;
@@ -147,6 +154,10 @@ export function mapToAirtableFields(fields: NormalizedFields, platform: Platform
   return removeUndefined(mapped);
 }
 
+export function removeEmptyValues(fields: NormalizedFields): NormalizedFields {
+  return cleanEmptyValues(fields, false).fields;
+}
+
 export async function updateAirtable({
   platform,
   recordId,
@@ -174,6 +185,7 @@ export async function updateAirtable({
 
   const airtableFields = mapToAirtableFields(fields, platform);
   const strictUpdates = process.env.STRICT_AIRTABLE_UPDATES === "true";
+  const allowClearing = process.env.ALLOW_CLEARING_AIRTABLE_FIELDS === "true";
   logPreparedUpdate({
     platform,
     recordId,
@@ -182,8 +194,21 @@ export async function updateAirtable({
     skippedFields: [],
   });
   const target = { apiKey, baseId, configuredTableId, initialTableId };
-  const firstSanitized = await sanitizeAirtableFields(target, platform, fields, airtableFields, initialTableId, strictUpdates);
-  const firstAttempt = await patchRecordSafely(target, recordId, firstSanitized.airtableFields, initialTableId, strictUpdates);
+  const firstExistingRecord = !allowClearing && needsIdentityFallback(platform, airtableFields)
+    ? await readRecord(target, recordId, initialTableId)
+    : null;
+  const firstFieldsWithFallback = applyExistingIdentityFallback(platform, recordId, airtableFields, firstExistingRecord?.fields ?? null);
+  const firstSanitized = await sanitizeAirtableFields(target, platform, fields, firstFieldsWithFallback, initialTableId, strictUpdates);
+  const firstCleaned = cleanEmptyValues(firstSanitized.airtableFields, allowClearing);
+  const firstAttempt = await patchRecordSafely({
+    target,
+    platform,
+    recordId,
+    airtableFields: firstCleaned.fields,
+    tableId: initialTableId,
+    strictUpdates,
+    skippedFields: [...firstSanitized.skippedFields, ...firstCleaned.skippedFields],
+  });
   if (firstAttempt.response.ok) {
     return buildUpdateResult({
       airtableFields: firstAttempt.airtableFields,
@@ -193,7 +218,7 @@ export async function updateAirtable({
       resolvedTableId: initialTableId,
       resolvedTableName: null,
       autoDiscoveryRan: false,
-      skippedFields: [...firstSanitized.skippedFields, ...firstAttempt.skippedFields],
+      skippedFields: firstAttempt.skippedFields,
     });
   }
 
@@ -215,7 +240,7 @@ export async function updateAirtable({
       resolvedTableId: initialTableId,
       resolvedTableName: null,
       autoDiscoveryRan: false,
-      skippedFields: [...firstSanitized.skippedFields, ...firstAttempt.skippedFields],
+      skippedFields: firstAttempt.skippedFields,
     });
   }
 
@@ -240,12 +265,25 @@ export async function updateAirtable({
       resolvedTableId: null,
       resolvedTableName: null,
       autoDiscoveryRan: true,
-      skippedFields: [...firstSanitized.skippedFields, ...firstAttempt.skippedFields],
+      skippedFields: firstAttempt.skippedFields,
     });
   }
 
-  const retrySanitized = await sanitizeAirtableFields(target, platform, fields, airtableFields, resolved.id, strictUpdates);
-  const retry = await patchRecordSafely(target, recordId, retrySanitized.airtableFields, resolved.id, strictUpdates);
+  const retryExistingRecord = !allowClearing && needsIdentityFallback(platform, airtableFields)
+    ? await readRecord(target, recordId, resolved.id)
+    : null;
+  const retryFieldsWithFallback = applyExistingIdentityFallback(platform, recordId, airtableFields, retryExistingRecord?.fields ?? null);
+  const retrySanitized = await sanitizeAirtableFields(target, platform, fields, retryFieldsWithFallback, resolved.id, strictUpdates);
+  const retryCleaned = cleanEmptyValues(retrySanitized.airtableFields, allowClearing);
+  const retry = await patchRecordSafely({
+    target,
+    platform,
+    recordId,
+    airtableFields: retryCleaned.fields,
+    tableId: resolved.id,
+    strictUpdates,
+    skippedFields: [...firstAttempt.skippedFields, ...retrySanitized.skippedFields, ...retryCleaned.skippedFields],
+  });
   if (!retry.response.ok) {
     logAirtableFailure({
       status: retry.response.status,
@@ -264,7 +302,7 @@ export async function updateAirtable({
       resolvedTableId: resolved.id,
       resolvedTableName: resolved.name,
       autoDiscoveryRan: true,
-      skippedFields: [...firstSanitized.skippedFields, ...retrySanitized.skippedFields, ...retry.skippedFields],
+      skippedFields: retry.skippedFields,
     });
   }
 
@@ -276,7 +314,7 @@ export async function updateAirtable({
     resolvedTableId: resolved.id,
     resolvedTableName: resolved.name,
     autoDiscoveryRan: true,
-    skippedFields: [...firstSanitized.skippedFields, ...retrySanitized.skippedFields, ...retry.skippedFields],
+    skippedFields: retry.skippedFields,
   });
 }
 
@@ -309,43 +347,95 @@ async function patchRecord(target: AirtableTarget, recordId: string, airtableFie
   };
 }
 
-async function patchRecordSafely(
-  target: AirtableTarget,
-  recordId: string,
-  airtableFields: NormalizedFields,
-  tableId: string,
-  strictUpdates: boolean,
-) {
-  const firstAttempt = await patchRecord(target, recordId, airtableFields, tableId);
-  if (firstAttempt.response.ok || strictUpdates) {
-    return { ...firstAttempt, airtableFields, skippedFields: [] as SkippedAirtableField[] };
-  }
-
-  const rejectedField = getRejectedFieldName(firstAttempt.body);
-  if (!rejectedField || !(rejectedField in airtableFields)) {
-    return { ...firstAttempt, airtableFields, skippedFields: [] as SkippedAirtableField[] };
-  }
-
-  const retryFields = { ...airtableFields };
-  delete retryFields[rejectedField];
-  const skippedFields = [
+async function readRecord(target: AirtableTarget, recordId: string, tableId: string) {
+  const response = await fetch(
+    `https://api.airtable.com/v0/${encodeURIComponent(target.baseId)}/${encodeURIComponent(tableId)}/${encodeURIComponent(
+      recordId,
+    )}`,
     {
+      headers: {
+        Authorization: `Bearer ${target.apiKey}`,
+      },
+    },
+  );
+  const body = await readResponseBody(response);
+  if (!response.ok) {
+    return null;
+  }
+
+  return {
+    body,
+    fields: getRecordFields(body),
+  };
+}
+
+async function patchRecordSafely({
+  target,
+  platform,
+  recordId,
+  airtableFields,
+  tableId,
+  strictUpdates,
+  skippedFields,
+}: {
+  target: AirtableTarget;
+  platform: Platform;
+  recordId: string;
+  airtableFields: NormalizedFields;
+  tableId: string;
+  strictUpdates: boolean;
+  skippedFields: SkippedAirtableField[];
+}): Promise<PatchAttempt> {
+  let fields = { ...airtableFields };
+  const allSkippedFields = [...skippedFields];
+
+  for (let attempt = 0; attempt <= 5; attempt += 1) {
+    if (Object.keys(fields).length === 0) {
+      return emptyPatchAttempt(fields, allSkippedFields);
+    }
+
+    console.log("FINAL CLEANED AIRTABLE PATCH BODY", {
+      platform,
+      recordId,
+      fieldCount: Object.keys(fields).length,
+      fields,
+    });
+
+    const result = await patchRecord(target, recordId, fields, tableId);
+    console.log("AIRTABLE PATCH RESPONSE", {
+      platform,
+      recordId,
+      status: result.response.status,
+      airtableRecordId: getRecordId(result.body),
+      returnedFields: getRecordFields(result.body),
+    });
+
+    if (result.response.ok || strictUpdates) {
+      return { ...result, airtableFields: fields, skippedFields: allSkippedFields };
+    }
+
+    const rejectedField = getRejectedFieldName(result.body);
+    if (!rejectedField || !(rejectedField in fields) || attempt === 5) {
+      return { ...result, airtableFields: fields, skippedFields: allSkippedFields };
+    }
+
+    fields = { ...fields };
+    delete fields[rejectedField];
+    const skippedField = {
       airtableField: rejectedField,
       reason: "Airtable rejected this field value; retried without it.",
-    },
-  ];
-  console.warn("Retrying Airtable update without rejected field", {
-    recordId,
-    tableId,
-    skippedFields,
-  });
+    };
+    allSkippedFields.push(skippedField);
+    console.warn("Retrying Airtable update without rejected field", {
+      platform,
+      recordId,
+      tableId,
+      skippedField,
+      remainingFieldCount: Object.keys(fields).length,
+    });
+  }
 
-  const retry = await patchRecord(target, recordId, retryFields, tableId);
-  return {
-    ...retry,
-    airtableFields: retryFields,
-    skippedFields,
-  };
+  return emptyPatchAttempt(fields, allSkippedFields);
 }
 
 async function sanitizeAirtableFields(
@@ -401,6 +491,107 @@ async function sanitizeAirtableFields(
   }
 
   return { airtableFields: fields, skippedFields };
+}
+
+function cleanEmptyValues(airtableFields: NormalizedFields, allowClearing: boolean) {
+  if (allowClearing) {
+    return { fields: airtableFields, skippedFields: [] as SkippedAirtableField[] };
+  }
+
+  const fields: NormalizedFields = {};
+  const skippedFields: SkippedAirtableField[] = [];
+
+  for (const [airtableField, value] of Object.entries(airtableFields)) {
+    if (isEmptyAirtableValue(value)) {
+      skippedFields.push({
+        airtableField,
+        reason: "Empty Airtable value was not sent to avoid clearing existing data.",
+      });
+      continue;
+    }
+
+    fields[airtableField] = value;
+  }
+
+  if (skippedFields.length > 0) {
+    console.warn("Skipping empty Airtable fields", {
+      skippedFields,
+    });
+  }
+
+  return { fields, skippedFields };
+}
+
+function isEmptyAirtableValue(value: unknown) {
+  return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
+function emptyPatchAttempt(airtableFields: NormalizedFields, skippedFields: SkippedAirtableField[]): PatchAttempt {
+  const body = {
+    error: {
+      message: "No non-empty Airtable fields to update",
+    },
+  };
+
+  return {
+    response: new Response(JSON.stringify(body), { status: 422 }),
+    body,
+    airtableFields,
+    skippedFields,
+  };
+}
+
+function applyExistingIdentityFallback(
+  platform: Platform,
+  recordId: string,
+  airtableFields: NormalizedFields,
+  existingFields: NormalizedFields | null,
+): NormalizedFields {
+  if (!existingFields) {
+    return airtableFields;
+  }
+
+  const primaryField = platform === "tiktok" ? "Tiktok Username" : "Instagram Username";
+  if (!isEmptyAirtableValue(airtableFields[primaryField])) {
+    return airtableFields;
+  }
+
+  const existingUsername = getExistingIdentityValue(existingFields, platform);
+  if (!existingUsername) {
+    return airtableFields;
+  }
+
+  console.warn("Parser did not find username. Preserving existing Airtable username.", {
+    platform,
+    recordId,
+    airtableField: primaryField,
+  });
+
+  return {
+    ...airtableFields,
+    [primaryField]: existingUsername,
+  };
+}
+
+function needsIdentityFallback(platform: Platform, airtableFields: NormalizedFields): boolean {
+  const primaryField = platform === "tiktok" ? "Tiktok Username" : "Instagram Username";
+  return primaryField in airtableFields && isEmptyAirtableValue(airtableFields[primaryField]);
+}
+
+function getExistingIdentityValue(existingFields: NormalizedFields, platform: Platform): unknown {
+  const candidates =
+    platform === "tiktok"
+      ? ["Tiktok Username", "TikTok Username", "Username", "Handle"]
+      : ["Instagram Username", "Username", "Handle"];
+
+  for (const field of candidates) {
+    const value = existingFields[field];
+    if (!isEmptyAirtableValue(value)) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 async function fetchTableMetadata(target: AirtableTarget, tableId: string) {
@@ -481,6 +672,24 @@ function getAirtableErrorMessage(responseBody: unknown): string {
   }
 
   return "Airtable returned an error.";
+}
+
+function getRecordId(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || !("id" in body)) {
+    return null;
+  }
+
+  const id = (body as { id?: unknown }).id;
+  return typeof id === "string" ? id : null;
+}
+
+function getRecordFields(body: unknown): NormalizedFields | null {
+  if (typeof body !== "object" || body === null || !("fields" in body)) {
+    return null;
+  }
+
+  const fields = (body as { fields?: unknown }).fields;
+  return typeof fields === "object" && fields !== null && !Array.isArray(fields) ? (fields as NormalizedFields) : null;
 }
 
 function getTables(body: unknown): AirtableTable[] {
