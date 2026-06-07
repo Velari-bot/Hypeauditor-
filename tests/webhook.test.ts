@@ -141,6 +141,7 @@ describe("POST /api/webhooks/hypeauditor", () => {
   it("returns 422 when an Instagram payload produces no usable parsed fields", async () => {
     setInstagramEnv();
     const fetchMock = vi.fn();
+    const logMock = vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await postWebhook({
@@ -157,16 +158,33 @@ describe("POST /api/webhooks/hypeauditor", () => {
       debug: {
         bodyKeys: expect.arrayContaining(["recordId", "platform", "hypeauditorData"]),
         hypeauditorDataKeys: expect.arrayContaining(["result"]),
+        platform: "instagram",
+        recordID: "recInstagram",
         reportFound: true,
         checkedReportPaths: expect.arrayContaining(["raw.result.report", "raw.output.result.report"]),
+        checkedPaths: expect.arrayContaining(["raw.result.report", "raw.output.result.report"]),
         reportPath: "raw.result.report",
+        foundReportPath: "raw.result.report",
         reportKeys: expect.arrayContaining(["basic", "metrics", "features"]),
         basicKeys: [],
         metricsKeys: [],
         featuresKeys: [],
+        hypeauditorDataWasString: false,
+        stringLength: null,
+        stringPreview: null,
+        jsonParseSucceeded: null,
         samplePreview: expect.stringContaining("report_state"),
       },
     });
+    expect(body.message).toMatch(/payload was received/i);
+    expect(logMock).toHaveBeenCalledWith(
+      "INSTAGRAM NO USABLE FIELDS DEBUG",
+      expect.objectContaining({
+        platform: "instagram",
+        recordID: "recInstagram",
+        foundReportPath: "raw.result.report",
+      }),
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -198,6 +216,49 @@ describe("POST /api/webhooks/hypeauditor", () => {
       debug: {
         reportFound: true,
         foundPath: "raw.output.result.report",
+        foundReportPath: "raw.output.result.report",
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("debug parse endpoint returns string diagnostics without Airtable", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const stringifiedPayload = JSON.stringify({
+      result: {
+        report_state: "READY",
+        report: {
+          basic: {},
+          metrics: {},
+          features: {},
+        },
+      },
+    });
+
+    const response = await DEBUG_PARSE_POST(
+      new NextRequest("http://localhost/api/debug/parse", {
+        method: "POST",
+        headers: new Headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          platform: "instagram",
+          hypeauditorData: stringifiedPayload,
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      platform: "instagram",
+      debug: {
+        platform: "instagram",
+        hypeauditorDataWasString: true,
+        stringLength: stringifiedPayload.length,
+        stringPreview: stringifiedPayload.slice(0, 500),
+        jsonParseSucceeded: true,
+        foundReportPath: "raw.result.report",
       },
     });
     expect(fetchMock).not.toHaveBeenCalled();

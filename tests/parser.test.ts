@@ -14,6 +14,7 @@ import {
   PayloadParseError,
   findHypeAuditorReport,
   getPayloadDebugInfo,
+  getWebhookPayloadDebugInfo,
 } from "../lib/parser";
 
 describe("parseIncomingPayload", () => {
@@ -213,6 +214,80 @@ describe("creator parsers", () => {
 
     expect(found.foundPath).toBe("raw.wrapper.inner.final");
     expect(found.report?.basic).toBeTruthy();
+  });
+
+  it("recursively finds a report object at depth 8", () => {
+    const found = findHypeAuditorReport({
+      a: { b: { c: { d: { e: { f: { g: { h: instagramSample.result.report } } } } } } },
+    });
+
+    expect(found.foundPath).toBe("raw.a.b.c.d.e.f.g.h");
+    expect(found.report?.basic).toBeTruthy();
+  });
+
+  it("recognizes alternate Instagram report-like shapes", () => {
+    const profileShape = findHypeAuditorReport({
+      nested: {
+        profile: { username: "profilecreator" },
+        metrics: {},
+        audience: {},
+      },
+    });
+    const userShape = findHypeAuditorReport({
+      nested: {
+        user: { username: "usercreator" },
+        metrics: {},
+        audience: {},
+      },
+    });
+    const reportWrapperShape = findHypeAuditorReport({
+      nested: {
+        report: {
+          basic: { username: "wrappedcreator" },
+          metrics: {},
+        },
+      },
+    });
+
+    expect(profileShape.foundPath).toBe("raw.nested");
+    expect(profileShape.report?.profile).toBeTruthy();
+    expect(userShape.foundPath).toBe("raw.nested");
+    expect(userShape.report?.user).toBeTruthy();
+    expect(reportWrapperShape.foundPath).toBe("raw.nested");
+    expect(reportWrapperShape.report?.basic).toBeTruthy();
+  });
+
+  it("includes string diagnostics and a 5000 character preview for webhook debug info", () => {
+    const longBio = "x".repeat(6000);
+    const stringifiedPayload = JSON.stringify({
+      result: {
+        report_state: "READY",
+        report: {
+          basic: { username: "longcreator", description: longBio },
+          metrics: {},
+          features: {},
+        },
+      },
+    });
+    const debug = getWebhookPayloadDebugInfo(
+      {
+        recordID: "recInstagram",
+        platform: "instagram",
+        hypeauditorData: stringifiedPayload,
+      },
+      JSON.parse(stringifiedPayload),
+      { platform: "instagram", recordId: "recInstagram" },
+    );
+
+    expect(debug.platform).toBe("instagram");
+    expect(debug.recordID).toBe("recInstagram");
+    expect(debug.hypeauditorDataWasString).toBe(true);
+    expect(debug.stringLength).toBe(stringifiedPayload.length);
+    expect(debug.stringPreview).toBe(stringifiedPayload.slice(0, 500));
+    expect(debug.jsonParseSucceeded).toBe(true);
+    expect(debug.samplePreview.length).toBeLessThanOrEqual(5003);
+    expect(debug.foundReportPath).toBe("raw.result.report");
+    expect(debug.checkedPaths).toContain("raw.result.report");
   });
 });
 

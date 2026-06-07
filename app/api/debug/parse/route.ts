@@ -43,7 +43,10 @@ export async function POST(request: NextRequest) {
     success: true,
     platform: parsedInput.platform,
     parsed: normalized,
-    debug: getWebhookPayloadDebugInfo(requestBody, parsedInput.raw),
+    debug: getWebhookPayloadDebugInfo(requestBody, parsedInput.raw, {
+      platform: parsedInput.platform,
+      recordId: parsedInput.recordId,
+    }),
   });
 }
 

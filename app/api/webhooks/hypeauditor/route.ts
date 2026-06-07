@@ -69,24 +69,19 @@ export async function POST(request: NextRequest) {
     const configuredAirtableTarget = getConfiguredAirtableTarget(parsedInput.platform);
 
     if (parsedInput.platform === "instagram" && countUsableFields(normalized) < 2) {
-      const debug = getWebhookPayloadDebugInfo(requestBody, parsedInput.raw);
-      console.log("INSTAGRAM PAYLOAD DEBUG", {
+      const debugObject = getWebhookPayloadDebugInfo(requestBody, parsedInput.raw, {
+        platform: parsedInput.platform,
         recordId: parsedInput.recordId,
-        bodyKeys: debug.bodyKeys,
-        hypeauditorDataKeys: debug.hypeauditorDataKeys,
-        reportFound: debug.reportFound,
-        foundPath: debug.foundPath,
-        reportKeys: debug.reportKeys,
-        basicKeys: debug.basicKeys,
-        metricsKeys: debug.metricsKeys,
-        featuresKeys: debug.featuresKeys,
       });
+      console.log("INSTAGRAM NO USABLE FIELDS DEBUG", debugObject);
 
       return NextResponse.json(
         {
           success: false,
           error: "Parsed Instagram payload produced no usable fields",
-          debug,
+          message:
+            "Instagram payload was received, but no usable HypeAuditor report fields were found. Inspect debug.bodyKeys, debug.hypeauditorDataKeys, debug.foundReportPath, and debug.samplePreview to confirm Zapier is sending the full Instagram HypeAuditor report.",
+          debug: debugObject,
           parsed: normalized,
         },
         { status: 422 },

@@ -333,8 +333,9 @@ export function findHypeAuditorReport(raw: unknown): { report: UnknownRecord | n
   ];
 
   for (const [path, candidate] of candidates) {
-    if (isReportObject(candidate)) {
-      return { report: asRecord(candidate), foundPath: path };
+    const report = asReportObject(candidate);
+    if (report) {
+      return { report, foundPath: path };
     }
   }
 
@@ -370,8 +371,10 @@ export function getPayloadDebugInfo(raw: unknown) {
     hypeauditorDataKeys: Object.keys(parsed),
     reportFound: Boolean(report),
     checkedReportPaths: CHECKED_REPORT_PATHS,
+    checkedPaths: CHECKED_REPORT_PATHS,
     reportPath: foundPath,
     foundPath,
+    foundReportPath: foundPath,
     report_state: getReportState(parsed),
     reportKeys: Object.keys(safeReport),
     basicKeys: Object.keys(basic),
@@ -379,24 +382,36 @@ export function getPayloadDebugInfo(raw: unknown) {
     featuresKeys: Object.keys(features),
     basicUsername: toCleanString(basic.username),
     basicDescriptionPresent: Boolean(toCleanString(basic.description)),
-    samplePreview: previewJson(raw),
+    samplePreview: safePreview(raw),
   };
 }
 
-export function getWebhookPayloadDebugInfo(reqBody: unknown, hypeauditorData: unknown) {
+export function getWebhookPayloadDebugInfo(
+  reqBody: unknown,
+  hypeauditorData: unknown,
+  options: { platform?: Platform | null; recordId?: string | null } = {},
+) {
   const body = asRecord(normalizeShallow(reqBody));
+  const originalHypeauditorData = getPayloadCandidateForDebug(body) ?? hypeauditorData;
   const hypeauditor = normalizeHypeAuditorPayload(hypeauditorData);
   const parsedHypeauditor = asRecord(hypeauditor);
   const debug = getPayloadDebugInfo(hypeauditor);
+  const stringDiagnostics = getStringDiagnostics(originalHypeauditorData);
 
   return {
     ...debug,
+    platform: options.platform ?? toCleanString(body.platform),
+    recordID: options.recordId ?? toCleanString(body.recordID) ?? toCleanString(body.recordId),
     bodyKeys: Object.keys(body),
     bodyTopLevelKeys: Object.keys(body),
     topLevelKeys: Object.keys(body),
     hypeauditorDataKeys: Object.keys(parsedHypeauditor),
     hypeauditorTopLevelKeys: debug.topLevelKeys,
-    samplePreview: previewJson(hypeauditorData),
+    hypeauditorDataWasString: stringDiagnostics.wasString,
+    stringLength: stringDiagnostics.stringLength,
+    stringPreview: stringDiagnostics.stringPreview,
+    jsonParseSucceeded: stringDiagnostics.jsonParseSucceeded,
+    samplePreview: safePreview(hypeauditor),
   };
 }
 
@@ -444,12 +459,13 @@ function hasReportShape(value: unknown): boolean {
 }
 
 function findReportRecursive(value: unknown, path = "raw", depth = 0): { report: UnknownRecord | null; foundPath: string | null } {
-  if (depth > 5) {
+  if (depth > 8) {
     return { report: null, foundPath: null };
   }
 
-  if (isReportObject(value)) {
-    return { report: asRecord(value), foundPath: path };
+  const report = asReportObject(value);
+  if (report) {
+    return { report, foundPath: path };
   }
 
   if (!isRecord(value)) {
@@ -467,11 +483,25 @@ function findReportRecursive(value: unknown, path = "raw", depth = 0): { report:
 }
 
 function isReportObject(value: unknown): boolean {
+  return Boolean(asReportObject(value));
+}
+
+function asReportObject(value: unknown): UnknownRecord | null {
   const record = asRecord(value);
-  return Boolean(
+  if (
     (isRecord(record.basic) && isRecord(record.metrics) && isRecord(record.features)) ||
-      (isRecord(record.user) && isRecord(record.metrics) && isRecord(record.audience)),
-  );
+    (isRecord(record.profile) && isRecord(record.metrics) && isRecord(record.audience)) ||
+    (isRecord(record.user) && isRecord(record.metrics) && isRecord(record.audience))
+  ) {
+    return record;
+  }
+
+  const nestedReport = asRecord(record.report);
+  if (isRecord(nestedReport.basic) && isRecord(nestedReport.metrics)) {
+    return nestedReport;
+  }
+
+  return null;
 }
 
 function normalizeShallow(value: unknown): unknown {
@@ -491,8 +521,56 @@ function normalizeShallow(value: unknown): unknown {
   }
 }
 
-function previewJson(value: unknown, limit = 3000): string {
-  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+export function safePreview(value: unknown, maxLength = 5000): string {
+  let text: string;
+  try {
+    text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  } catch {
+    text = String(value);
+  }
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function getStringDiagnostics(value: unknown) {
+  if (typeof value !== "string") {
+    return {
+      wasString: false,
+      stringLength: null,
+      stringPreview: null,
+      jsonParseSucceeded: null,
+    };
+  }
+
+  const trimmed = value.trim();
+  let jsonParseSucceeded = false;
+  if (trimmed) {
+    try {
+      JSON.parse(trimmed);
+      jsonParseSucceeded = true;
+    } catch {
+      jsonParseSucceeded = false;
+    }
+  }
+
+  return {
+    wasString: true,
+    stringLength: value.length,
+    stringPreview: value.slice(0, 500),
+    jsonParseSucceeded,
+  };
+}
+
+function getPayloadCandidateForDebug(body: UnknownRecord): unknown {
+  for (const key of PAYLOAD_KEYS) {
+    if (key in body) {
+      return body[key];
+    }
+  }
+  return undefined;
+}
+
+function previewJson(value: unknown, limit = 5000): string {
+  const text = safePreview(value, Number.MAX_SAFE_INTEGER);
   return text.length > limit ? `${text.slice(0, limit)}...` : text;
 }
 
