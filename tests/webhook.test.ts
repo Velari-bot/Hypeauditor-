@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import tiktokSample from "../fixtures/tiktok-hypeauditor-sample.json";
 import instagramSample from "../fixtures/instagram-hypeauditor-sample.json";
+import instagramUserSample from "../fixtures/instagram-hypeauditor-user-sample.json";
 import { POST } from "../app/api/webhooks/hypeauditor/route";
 import { POST as DEBUG_PARSE_POST } from "../app/api/debug/parse/route";
 
@@ -69,6 +70,38 @@ describe("POST /api/webhooks/hypeauditor", () => {
       },
     });
     expect(body.updatedFields).toContain("Instagram Username");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 200 and success true for an Instagram result.user payload", async () => {
+    setInstagramEnv();
+    const fetchMock = mockAirtableSuccess();
+
+    const response = await postWebhook({
+      recordId: "recInstagram",
+      platform: "instagram",
+      hypeauditorData: instagramUserSample,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      platform: "instagram",
+      recordId: "recInstagram",
+      username: "mrbeast",
+      parsed: {
+        instagram_username: "mrbeast",
+        bio: "Watch my latest video!! 👇",
+        instagram_profile_url: "https://www.instagram.com/mrbeast/",
+        followers: 86954423,
+        average_likes: 6167,
+        niche: "Entertainment, Video & Movies",
+        hype_auditor_profile: "https://hypeauditor.com/instagram/mrbeast/",
+      },
+    });
+    expect(body.updatedFields).toContain("Instagram Username");
+    expect(body.updatedFields).toContain("Average Likes");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

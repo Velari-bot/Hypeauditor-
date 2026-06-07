@@ -1,0 +1,27 @@
+{
+  "result": {
+    "report_state": "READY",
+    "user": {
+      "id": "2278169415",
+      "username": "mrbeast",
+      "full_name": "MrBeast",
+      "is_private": false,
+      "is_verified": true,
+      "is_deleted": false,
+      "about": "Watch my latest video!! 👇",
+      "photo_url": "https://example.com/mrbeast.jpg",
+      "posts_count": 481,
+      "followers_count": 86954423,
+      "followings_count": 940,
+      "avg_likes": 6167,
+      "avg_comments": 344,
+      "aqs": 66,
+      "aqs_name": "Good",
+      "blogger_categories": [1017, 1036],
+      "blogger_languages": ["en"],
+      "blogger_hashtags": {
+        "data": []
+      }
+    }
+  }
+}

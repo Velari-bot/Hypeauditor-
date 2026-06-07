@@ -108,6 +108,11 @@ const THEMATIC_MAP: Record<string, string> = {
   "15": "Art",
 };
 
+const INSTAGRAM_CATEGORY_MAP: Record<string, string> = {
+  "1017": "Entertainment",
+  "1036": "Video & Movies",
+};
+
 export function parseIncomingPayload(reqBody: unknown): ParsedIncomingPayload {
   const body = parseJsonDeep(reqBody, "request body");
   const bodyObject = isRecord(body) ? body : {};
@@ -193,6 +198,41 @@ export function parseTikTok(raw: unknown, options: { inputUsername?: string | nu
 
 export function parseInstagram(raw: unknown, options: { inputUsername?: string | null } = {}): InstagramFields {
   const parsed = normalizeHypeAuditorPayload(raw);
+  const user = findInstagramUser(parsed);
+
+  if (user) {
+    const username = cleanUsername(toCleanString(user.username)) ?? cleanUsername(options.inputUsername ?? null);
+    const bio = toCleanString(user.about) ?? toCleanString(user.description);
+
+    console.log("INSTAGRAM PARSER USED USER SHAPE", {
+      username,
+      followers: user.followers_count,
+      avg_likes: user.avg_likes,
+      hasBio: Boolean(bio),
+    });
+
+    return removeUndefined({
+      instagram_username: username,
+      country: uppercaseOrNull(user.country ?? valueAt(user, ["geo", "country"])),
+      niche: formatInstagramCategories(user.blogger_categories),
+      bio,
+      instagram_profile_url: username ? `https://www.instagram.com/${username}/` : null,
+      followers: toNumber(user.followers_count ?? user.followers),
+      avg_views: null,
+      average_likes: toNumber(user.avg_likes ?? user.average_likes),
+      total_likes: null,
+      engagement_rate: toNumber(user.er ?? user.er_avg ?? user.engagement_rate),
+      audience_country: null,
+      audience_gender: null,
+      audience_age: null,
+      instagram_rate: null,
+      exclusivity: null,
+      phone_number: extractPhone(bio),
+      hype_auditor_profile: username ? `https://hypeauditor.com/instagram/${username}/` : null,
+      last_updated: formatLastUpdated(),
+    }) as InstagramFields;
+  }
+
   const report = getReport(parsed);
   const basic = asRecord(report.basic ?? report.user);
   const metrics = asRecord(report.metrics);
@@ -606,6 +646,40 @@ function formatNiche(value: unknown): string | null {
   }
 
   return toCleanString(value);
+}
+
+function formatInstagramCategories(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return toCleanString(value);
+  }
+
+  const labels = value
+    .map((item) => {
+      const id = toCleanString(item);
+      return id ? INSTAGRAM_CATEGORY_MAP[id] ?? `Category ${id}` : null;
+    })
+    .filter((item): item is string => Boolean(item));
+
+  return labels.length > 0 ? labels.join(", ") : null;
+}
+
+function findInstagramUser(raw: unknown): UnknownRecord | null {
+  const parsed = asRecord(raw);
+  const candidates = [
+    valueAt(parsed, ["result", "user"]),
+    parsed.user,
+    valueAt(parsed, ["data", "result", "user"]),
+    valueAt(parsed, ["data", "user"]),
+    valueAt(parsed, ["hypeauditorData", "result", "user"]),
+  ];
+
+  for (const candidate of candidates) {
+    if (isRecord(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function valueAt(source: unknown, path: string[]): unknown {

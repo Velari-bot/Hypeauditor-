@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import tiktokSample from "../fixtures/tiktok-hypeauditor-sample.json";
 import instagramSample from "../fixtures/instagram-hypeauditor-sample.json";
+import instagramUserSample from "../fixtures/instagram-hypeauditor-user-sample.json";
 import {
   extractEmail,
   extractPhone,
@@ -178,6 +179,27 @@ describe("creator parsers", () => {
     });
     expect("avg_likes" in parsed).toBe(false);
     expect("tiktok_rate" in parsed).toBe(false);
+  });
+
+  it("parses Instagram result.user payloads", () => {
+    const parsed = parseInstagram(instagramUserSample);
+
+    expect(parsed).toMatchObject({
+      instagram_username: "mrbeast",
+      bio: "Watch my latest video!! 👇",
+      instagram_profile_url: "https://www.instagram.com/mrbeast/",
+      followers: 86954423,
+      average_likes: 6167,
+      niche: "Entertainment, Video & Movies",
+      avg_views: null,
+      total_likes: null,
+      audience_country: null,
+      audience_gender: null,
+      audience_age: null,
+      instagram_rate: null,
+      phone_number: null,
+      hype_auditor_profile: "https://hypeauditor.com/instagram/mrbeast/",
+    });
   });
 
   it("returns nulls instead of crashing on missing nested fields", () => {
