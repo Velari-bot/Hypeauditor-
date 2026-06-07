@@ -5,6 +5,7 @@ type UnknownRecord = Record<string, unknown>;
 export type ParsedIncomingPayload = {
   recordId: string | null;
   platform: Platform | null;
+  airtableTableId: string | null;
   raw: unknown;
 };
 
@@ -99,11 +100,16 @@ export function parseIncomingPayload(reqBody: unknown): ParsedIncomingPayload {
     toCleanString(bodyObject.airtableRecordId);
   const platformValue = toCleanString(bodyObject.platform)?.toLowerCase();
   const platform = platformValue === "tiktok" || platformValue === "instagram" ? platformValue : null;
+  const airtableTableId =
+    toCleanString(bodyObject.airtableTableId) ??
+    toCleanString(bodyObject.tableId) ??
+    toCleanString(bodyObject.airtable_table_id);
   const raw = findPayloadCandidate(bodyObject) ?? body;
 
   return {
     recordId,
     platform,
+    airtableTableId,
     raw: normalizeHypeAuditorPayload(raw),
   };
 }

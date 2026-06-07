@@ -57,6 +57,33 @@ describe("parseIncomingPayload", () => {
     expect(parsed.recordId).toBe("recZapier123");
   });
 
+  it("accepts Airtable table override keys", () => {
+    expect(
+      parseIncomingPayload({
+        recordId: "rec123",
+        platform: "tiktok",
+        airtableTableId: "tblOverride",
+        hypeauditorData: tiktokSample,
+      }).airtableTableId,
+    ).toBe("tblOverride");
+    expect(
+      parseIncomingPayload({
+        recordId: "rec123",
+        platform: "tiktok",
+        tableId: "tblTableId",
+        hypeauditorData: tiktokSample,
+      }).airtableTableId,
+    ).toBe("tblTableId");
+    expect(
+      parseIncomingPayload({
+        recordId: "rec123",
+        platform: "tiktok",
+        airtable_table_id: "tblSnake",
+        hypeauditorData: tiktokSample,
+      }).airtableTableId,
+    ).toBe("tblSnake");
+  });
+
   it("supports the full HypeAuditor result directly as the body", () => {
     const parsed = parseIncomingPayload(tiktokSample);
 

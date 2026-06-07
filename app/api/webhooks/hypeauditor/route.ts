@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AirtableUpdateError, mapToAirtableFields, updateAirtable } from "../../../../lib/airtable";
+import {
+  AirtableUpdateError,
+  getConfiguredAirtableTarget,
+  mapToAirtableFields,
+  updateAirtable,
+} from "../../../../lib/airtable";
 import {
   getReportState,
   PayloadParseError,
@@ -55,6 +60,7 @@ export async function POST(request: NextRequest) {
     const reportState = getReportState(parsedInput.raw);
     const warnings = reportState && reportState !== "READY" ? [`HypeAuditor report_state is ${reportState}.`] : [];
     const mappedAirtableFields = mapToAirtableFields(normalized, parsedInput.platform);
+    const configuredAirtableTarget = getConfiguredAirtableTarget(parsedInput.platform);
 
     if (dryRun) {
       const updatedFields = Object.keys(mappedAirtableFields);
@@ -65,6 +71,8 @@ export async function POST(request: NextRequest) {
         report_state: reportState,
         username,
         updatedFields,
+        configuredTableId: configuredAirtableTarget.tableId,
+        incomingTableOverride: parsedInput.airtableTableId,
       });
 
       return NextResponse.json({
@@ -74,18 +82,25 @@ export async function POST(request: NextRequest) {
         recordId: parsedInput.recordId,
         username,
         updatedFields,
+        airtableTarget: {
+          baseId: configuredAirtableTarget.baseId,
+          configuredTableId: configuredAirtableTarget.tableId,
+          incomingTableOverride: parsedInput.airtableTableId,
+          liveModeNote: "Live mode will use the incoming table override if provided, then auto-resolve the record table if needed.",
+        },
         airtableBody: { fields: mappedAirtableFields },
         warnings,
         parsed: normalized,
       });
     }
 
-    const { airtableFields } = await updateAirtable({
+    const updateResult = await updateAirtable({
       platform: parsedInput.platform,
       recordId: parsedInput.recordId,
       fields: normalized,
+      airtableTableId: parsedInput.airtableTableId,
     });
-    const updatedFields = Object.keys(airtableFields);
+    const updatedFields = Object.keys(updateResult.airtableFields);
 
     console.log("HypeAuditor webhook processed", {
       platform: parsedInput.platform,
@@ -93,6 +108,10 @@ export async function POST(request: NextRequest) {
       report_state: reportState,
       username,
       updatedFields,
+      configuredTableId: updateResult.configuredTableId,
+      resolvedTableId: updateResult.resolvedTableId,
+      resolvedTableName: updateResult.resolvedTableName,
+      autoDiscoveryRan: updateResult.autoDiscoveryRan,
     });
 
     return NextResponse.json({
@@ -101,6 +120,13 @@ export async function POST(request: NextRequest) {
       recordId: parsedInput.recordId,
       username,
       updatedFields,
+      airtableTarget: {
+        configuredTableId: updateResult.configuredTableId,
+        initialTableId: updateResult.initialTableId,
+        resolvedTableId: updateResult.resolvedTableId,
+        resolvedTableName: updateResult.resolvedTableName,
+        autoDiscoveryRan: updateResult.autoDiscoveryRan,
+      },
       warnings,
       parsed: normalized,
     });
@@ -111,6 +137,13 @@ export async function POST(request: NextRequest) {
           success: false,
           error: error.message,
           airtableStatus: error.status,
+          airtableTarget: {
+            configuredTableId: error.configuredTableId ?? null,
+            initialTableId: error.initialTableId ?? null,
+            resolvedTableId: error.resolvedTableId ?? null,
+            resolvedTableName: error.resolvedTableName ?? null,
+            autoDiscoveryRan: error.autoDiscoveryRan ?? false,
+          },
         },
         { status: 500 },
       );

@@ -35,6 +35,13 @@ describe("POST /api/webhooks/hypeauditor", () => {
       },
     });
     expect(body.updatedFields).toContain("tiktok_username");
+    expect(body.airtableTarget).toMatchObject({
+      configuredTableId: "table",
+      initialTableId: "table",
+      resolvedTableId: "table",
+      resolvedTableName: null,
+      autoDiscoveryRan: false,
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -128,6 +135,7 @@ describe("POST /api/webhooks/hypeauditor", () => {
   });
 
   it("dry-run returns normalized and mapped fields without calling Airtable", async () => {
+    setTikTokEnv();
     process.env.WEBHOOK_SECRET = "test-secret";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -160,7 +168,35 @@ describe("POST /api/webhooks/hypeauditor", () => {
       },
     });
     expect(body.updatedFields).toContain("tiktok_username");
+    expect(body.airtableTarget).toMatchObject({
+      configuredTableId: "table",
+      incomingTableOverride: null,
+    });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes an incoming table override through to Airtable", async () => {
+    setTikTokEnv();
+    const fetchMock = mockAirtableSuccess();
+
+    const response = await postWebhook({
+      recordId: "recTiktok",
+      platform: "tiktok",
+      airtableTableId: "overrideTable",
+      hypeauditorData: tiktokSample,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.airtableTarget).toMatchObject({
+      configuredTableId: "table",
+      initialTableId: "overrideTable",
+      resolvedTableId: "overrideTable",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.airtable.com/v0/base/overrideTable/recTiktok",
+      expect.objectContaining({ method: "PATCH" }),
+    );
   });
 });
 
