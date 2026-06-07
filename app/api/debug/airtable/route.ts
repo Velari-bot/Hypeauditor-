@@ -3,6 +3,9 @@ import type { Platform } from "../../../../lib/parser";
 
 export const runtime = "nodejs";
 
+const AIRTABLE_REQUEST_TIMEOUT_MS = 4000;
+const RECORD_CHECK_BATCH_SIZE = 8;
+
 type AirtableTarget = {
   platform: Platform;
   baseId?: string;
@@ -131,7 +134,7 @@ async function findRecordAcrossAccessibleBases(apiKey: string | undefined, recor
     return { ok: false, skipped: true, error: "AIRTABLE_API_KEY is missing." };
   }
 
-  const basesResponse = await fetch("https://api.airtable.com/v0/meta/bases", {
+  const basesResponse = await fetchWithTimeout("https://api.airtable.com/v0/meta/bases", {
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
@@ -147,12 +150,21 @@ async function findRecordAcrossAccessibleBases(apiKey: string | undefined, recor
   }
 
   const bases = getBases(basesBody);
+  const tableGroups = await Promise.all(
+    bases.map(async (base) => ({
+      base,
+      tables: await getTablesForBase(apiKey, base.id),
+    })),
+  );
+  const candidates = tableGroups.flatMap(({ base, tables }) => tables.map((table) => ({ base, table })));
   const matches = [];
+  const skipped = [];
 
-  for (const base of bases) {
-    const tables = await getTablesForBase(apiKey, base.id);
-    for (const table of tables) {
-      const response = await fetch(
+  for (let index = 0; index < candidates.length; index += RECORD_CHECK_BATCH_SIZE) {
+    const batch = candidates.slice(index, index + RECORD_CHECK_BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async ({ base, table }) => {
+        const response = await fetchWithTimeout(
         `https://api.airtable.com/v0/${encodeURIComponent(base.id)}/${encodeURIComponent(table.id)}/${encodeURIComponent(
           recordId,
         )}`,
@@ -161,16 +173,34 @@ async function findRecordAcrossAccessibleBases(apiKey: string | undefined, recor
             Authorization: `Bearer ${apiKey}`,
           },
         },
-      );
-      const body = await readResponseBody(response);
+        );
+        const body = await readResponseBody(response);
 
-      if (response.ok) {
+        return {
+          response,
+          body,
+          base,
+          table,
+        };
+      }),
+    );
+
+    for (const result of results) {
+      if (result.response.ok) {
         matches.push({
-          baseId: base.id,
-          baseName: base.name,
-          tableId: table.id,
-          tableName: table.name,
-          recordId: getRecordId(body),
+          baseId: result.base.id,
+          baseName: result.base.name,
+          tableId: result.table.id,
+          tableName: result.table.name,
+          recordId: getRecordId(result.body),
+        });
+      } else if (result.response.status === 408) {
+        skipped.push({
+          baseId: result.base.id,
+          baseName: result.base.name,
+          tableId: result.table.id,
+          tableName: result.table.name,
+          reason: "timeout",
         });
       }
     }
@@ -179,6 +209,8 @@ async function findRecordAcrossAccessibleBases(apiKey: string | undefined, recor
   return {
     ok: matches.length > 0,
     searchedBases: bases.length,
+    searchedTables: candidates.length,
+    skipped,
     matches,
     hint:
       matches.length > 0
@@ -188,13 +220,33 @@ async function findRecordAcrossAccessibleBases(apiKey: string | undefined, recor
 }
 
 async function getTablesForBase(apiKey: string, baseId: string) {
-  const response = await fetch(`https://api.airtable.com/v0/meta/bases/${baseId}/tables`, {
+  const response = await fetchWithTimeout(`https://api.airtable.com/v0/meta/bases/${baseId}/tables`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
   });
   const body = await readResponseBody(response);
   return response.ok ? getTables(body) : [];
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AIRTABLE_REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return new Response(JSON.stringify({ error: "Airtable request timed out." }), { status: 408 });
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function readResponseBody(response: Response): Promise<unknown> {
