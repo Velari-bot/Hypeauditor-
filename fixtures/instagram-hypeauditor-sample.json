@@ -1,0 +1,52 @@
+{
+  "result": {
+    "report_state": "READY",
+    "report": {
+      "basic": {
+        "id": "instagram-1",
+        "username": "examplecreator",
+        "title": "Example Creator",
+        "description": "Lifestyle creator. Email hello@examplecreator.com or call +1 646-555-0100."
+      },
+      "metrics": {
+        "subscribers_count": { "value": 500000 },
+        "views_avg": { "value": 100000 },
+        "alikes_avg": { "value": 8500 },
+        "likes_count": { "value": 2000000 },
+        "er": { "value": 4.2 }
+      },
+      "features": {
+        "blogger_geo": {
+          "data": { "country": "gb" }
+        },
+        "blogger_prices": {
+          "data": {
+            "post_price": 1500
+          }
+        },
+        "blogger_emails": {
+          "data": ["fallback@examplecreator.com"]
+        },
+        "audience_geo": {
+          "data": {
+            "countries": [
+              { "id": "gb", "code": "gb", "prc": 40 },
+              { "id": "us", "code": "us", "prc": 20 },
+              { "id": "ca", "code": "ca", "prc": 8.5 }
+            ]
+          }
+        },
+        "audience_age_gender": {
+          "data": {
+            "18-24": { "male": 8, "female": 18 },
+            "25-34": { "male": 12, "female": 24 },
+            "35-44": { "male": 6, "female": 10 }
+          }
+        },
+        "blogger_thematics": {
+          "data": [8]
+        }
+      }
+    }
+  }
+}
