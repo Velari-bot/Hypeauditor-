@@ -297,6 +297,47 @@ describe("mapToAirtableFields", () => {
     );
   });
 
+  it("coerces values using live Airtable text field metadata", async () => {
+    process.env.AIRTABLE_API_KEY = "key";
+    process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
+    process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        tablesResponse([
+          {
+            id: "table",
+            name: "Link",
+            fields: [
+              { id: "fldFollowers", name: "Followers", type: "singleLineText" },
+              { id: "fldRate", name: "Tiktok Rate", type: "singleLineText" },
+            ],
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateAirtable({
+      platform: "tiktok",
+      recordId: "rec123",
+      fields: { followers: 124700000, tiktok_rate: "$204139.00" },
+    });
+
+    expect(result.airtableFields).toEqual({
+      Followers: "124700000",
+      "Tiktok Rate": "$204139.00",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.airtable.com/v0/base/table/rec123",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Followers: "124700000", "Tiktok Rate": "$204139.00" } }),
+      }),
+    );
+  });
+
   it("retries once without a field Airtable rejects", async () => {
     process.env.AIRTABLE_API_KEY = "key";
     process.env.TIKTOK_AIRTABLE_BASE_ID = "base";

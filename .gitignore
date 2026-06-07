@@ -3,6 +3,7 @@ node_modules/
 out/
 dist/
 coverage/
+debug/
 
 .env
 .env*.local

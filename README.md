@@ -15,6 +15,8 @@ INSTAGRAM_AIRTABLE_BASE_ID=
 INSTAGRAM_AIRTABLE_TABLE_ID=
 
 AIRTABLE_USE_FIELD_IDS=false
+ENABLE_PAYLOAD_CAPTURE=false
+ALLOW_CLEARING_AIRTABLE_FIELDS=false
 ```
 
 `WEBHOOK_SECRET` is optional. When it is set, every webhook request must include:
@@ -24,6 +26,10 @@ x-webhook-secret: <WEBHOOK_SECRET>
 ```
 
 `AIRTABLE_USE_FIELD_IDS` is included for clarity when you switch the centralized field maps in `lib/airtable.ts` from Airtable field names to field IDs. The outgoing `fields` object always uses the map values.
+
+`ENABLE_PAYLOAD_CAPTURE=true` saves incoming webhook bodies to `debug/payloads/` without headers or secrets. Use it briefly when Zapier/HypeAuditor sends a payload shape the parser does not recognize.
+
+`ALLOW_CLEARING_AIRTABLE_FIELDS=false` protects Airtable from destructive updates. By default the server removes `null`, `undefined`, empty strings, and empty arrays before PATCHing Airtable.
 
 ## Zapier Setup
 
@@ -173,6 +179,60 @@ curl -H 'x-webhook-secret: your-secret' \
 ```
 
 If `recordLocator.matches` is empty, Zapier is not sending an Airtable record ID that the token can access. If it finds a base/table different from the configured platform table, remap Zapier `recordID` to the right Airtable step or update the Railway base/table variables.
+
+### Local Schema Inspection
+
+To print the actual Airtable schema for both configured tables and save it to `debug/airtable-schema.json`:
+
+```bash
+npm run inspect:airtable
+```
+
+This shows each field name, field ID, Airtable type, and options. Use it to confirm whether columns like `Followers`, `Avg Views`, or `Tiktok Rate` are text, number, currency, formula, lookup, or another type.
+
+### One-Field Airtable Test
+
+To test which mapped fields are writable on a real record, one field at a time:
+
+```bash
+npm run test:airtable -- platform=tiktok recordId=recXXXXXXXXXXXXXX
+npm run test:airtable -- platform=instagram recordId=recXXXXXXXXXXXXXX
+```
+
+The script prints:
+
+```text
+Field Name | Field Type | Test Value | Result | Error
+```
+
+Successful test writes are restored to their previous value by default. Add `noRestore=true` only if you intentionally want to leave test values in place.
+
+### Parse A Captured Payload
+
+Save a live Zapier payload under `fixtures/`, then run:
+
+```bash
+npm run debug:parse -- fixtures/live-instagram-payload.json instagram
+npm run debug:parse -- fixtures/live-tiktok-payload.json tiktok
+```
+
+The parser debug output includes top-level keys, detected report path, report state, basic username/description status, metric keys, feature keys, and the final normalized object.
+
+### Capturing One Live Zapier Payload
+
+Set this Railway variable temporarily:
+
+```text
+ENABLE_PAYLOAD_CAPTURE=true
+```
+
+Run the Zap once. The server writes the raw request body to:
+
+```text
+debug/payloads/{platform}-{recordId}-{timestamp}.json
+```
+
+Turn capture off after you have one sample.
 
 ## Example Request
 

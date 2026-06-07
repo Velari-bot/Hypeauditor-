@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   AirtableUpdateError,
   getConfiguredAirtableTarget,
@@ -7,6 +9,7 @@ import {
 } from "../../../../lib/airtable";
 import {
   getReportState,
+  getPayloadDebugInfo,
   PayloadParseError,
   parseIncomingPayload,
   parseInstagram,
@@ -58,11 +61,24 @@ export async function POST(request: NextRequest) {
       parsedInput.platform === "tiktok"
         ? parseTikTok(parsedInput.raw, { inputUsername: parsedInput.inputUsername })
         : parseInstagram(parsedInput.raw, { inputUsername: parsedInput.inputUsername });
+    await capturePayloadIfEnabled(parsedInput.platform, parsedInput.recordId, requestBody);
     const username = getUsername(normalized, parsedInput.platform);
     const reportState = getReportState(parsedInput.raw);
     const warnings = reportState && reportState !== "READY" ? [`HypeAuditor report_state is ${reportState}.`] : [];
     const mappedAirtableFields = mapToAirtableFields(normalized, parsedInput.platform);
     const configuredAirtableTarget = getConfiguredAirtableTarget(parsedInput.platform);
+
+    if (parsedInput.platform === "instagram" && countUsableFields(normalized) < 2) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Parsed Instagram payload produced no usable fields",
+          debug: getPayloadDebugInfo(parsedInput.raw),
+          parsed: normalized,
+        },
+        { status: 422 },
+      );
+    }
 
     if (dryRun) {
       const updatedFields = Object.keys(mappedAirtableFields);
@@ -186,4 +202,35 @@ function getUsername(fields: Record<string, unknown>, platform: Platform): strin
   const key = platform === "tiktok" ? "tiktok_username" : "instagram_username";
   const value = fields[key];
   return typeof value === "string" ? value : null;
+}
+
+function countUsableFields(fields: Record<string, unknown>): number {
+  const ignored = new Set(["last_updated", "exclusivity"]);
+  return Object.entries(fields).filter(([key, value]) => !ignored.has(key) && !isEmptyParsedValue(value)).length;
+}
+
+function isEmptyParsedValue(value: unknown): boolean {
+  return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
+async function capturePayloadIfEnabled(platform: Platform, recordId: string, requestBody: unknown) {
+  if (process.env.ENABLE_PAYLOAD_CAPTURE !== "true") {
+    return;
+  }
+
+  try {
+    const payloadDir = path.join(process.cwd(), "debug", "payloads");
+    await mkdir(payloadDir, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const safeRecordId = recordId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const filePath = path.join(payloadDir, `${platform}-${safeRecordId}-${timestamp}.json`);
+    await writeFile(filePath, JSON.stringify(requestBody, null, 2));
+    console.log("Captured webhook payload", { platform, recordId, filePath });
+  } catch (error) {
+    console.warn("Failed to capture webhook payload", {
+      platform,
+      recordId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

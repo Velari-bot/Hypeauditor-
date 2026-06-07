@@ -321,6 +321,36 @@ export function getReportState(raw: unknown): string | null {
   );
 }
 
+export function getPayloadDebugInfo(raw: unknown) {
+  const parsed = asRecord(normalizeHypeAuditorPayload(raw));
+  const reportPath = findReportPath(parsed);
+  const report = getReport(parsed);
+  const basic = asRecord(report.basic);
+  const metrics = asRecord(report.metrics);
+  const features = asRecord(report.features);
+
+  return {
+    topLevelKeys: Object.keys(parsed),
+    reportPath,
+    report_state: getReportState(parsed),
+    basicUsername: toCleanString(basic.username),
+    basicDescriptionPresent: Boolean(toCleanString(basic.description)),
+    metricKeys: Object.keys(metrics),
+    featureKeys: Object.keys(features),
+  };
+}
+
+function findReportPath(parsed: UnknownRecord): string | null {
+  const candidates: Array<[string, unknown]> = [
+    ["result.report", valueAt(parsed, ["result", "report"])],
+    ["report", parsed.report],
+    ["data.result.report", valueAt(parsed, ["data", "result", "report"])],
+    ["data.report", valueAt(parsed, ["data", "report"])],
+  ];
+
+  return candidates.find(([, candidate]) => isRecord(candidate))?.[0] ?? null;
+}
+
 function findPayloadCandidate(body: UnknownRecord): unknown {
   for (const key of PAYLOAD_KEYS) {
     if (key in body) {

@@ -8,13 +8,13 @@ type AirtableFieldConfig = {
   type: AirtableValueType;
 };
 
-type AirtableTable = {
+export type AirtableTable = {
   id: string;
   name: string;
   fields?: AirtableFieldMetadata[];
 };
 
-type AirtableFieldMetadata = {
+export type AirtableFieldMetadata = {
   id: string;
   name: string;
   type: string;
@@ -156,6 +156,20 @@ export function mapToAirtableFields(fields: NormalizedFields, platform: Platform
 
 export function removeEmptyValues(fields: NormalizedFields): NormalizedFields {
   return cleanEmptyValues(fields, false).fields;
+}
+
+export async function getAirtableTableSchema(platform: Platform, tableIdOverride?: string | null): Promise<AirtableTable | null> {
+  const apiKey = process.env.AIRTABLE_API_KEY;
+  const baseId = platform === "tiktok" ? process.env.TIKTOK_AIRTABLE_BASE_ID : process.env.INSTAGRAM_AIRTABLE_BASE_ID;
+  const configuredTableId =
+    platform === "tiktok" ? process.env.TIKTOK_AIRTABLE_TABLE_ID : process.env.INSTAGRAM_AIRTABLE_TABLE_ID;
+  const tableId = tableIdOverride ?? configuredTableId;
+
+  if (!apiKey || !baseId || !configuredTableId || !tableId) {
+    return null;
+  }
+
+  return fetchTableMetadata({ apiKey, baseId, configuredTableId, initialTableId: tableId }, tableId);
 }
 
 export async function updateAirtable({
@@ -479,7 +493,10 @@ async function sanitizeAirtableFields(
 
       delete fields[fieldConfig.airtableField];
       skippedFields.push(skipped);
+      continue;
     }
+
+    fields[fieldConfig.airtableField] = coerceForAirtableFieldMetadata(normalizedFields[normalizedKey], field);
   }
 
   if (skippedFields.length > 0) {
@@ -837,6 +854,100 @@ function coerceForAirtable(value: unknown, type: AirtableValueType): unknown {
   }
 
   return value;
+}
+
+function coerceForAirtableFieldMetadata(value: unknown, field: AirtableFieldMetadata): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || value === "") {
+    return null;
+  }
+
+  if (isTextFieldType(field.type)) {
+    return String(value);
+  }
+
+  if (["number", "percent", "rating", "duration", "currency"].includes(field.type)) {
+    const number = Number(String(value).replace(/[$,%\s,]/g, ""));
+    return Number.isFinite(number) ? number : null;
+  }
+
+  if (field.type === "checkbox") {
+    if (typeof value === "boolean") {
+      return value;
+    }
+
+    const text = String(value).trim().toLowerCase();
+    if (["true", "yes", "1", "y"].includes(text)) {
+      return true;
+    }
+    if (["false", "no", "0", "n"].includes(text)) {
+      return false;
+    }
+    return Boolean(value);
+  }
+
+  if (field.type === "date") {
+    const date = value instanceof Date ? value : new Date(String(value));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+  }
+
+  if (field.type === "dateTime") {
+    const date = value instanceof Date ? value : new Date(String(value));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  if (field.type === "singleSelect") {
+    const optionName = findSelectOptionName(field, value);
+    return optionName ? { name: optionName } : null;
+  }
+
+  if (field.type === "multipleSelects") {
+    const values = Array.isArray(value) ? value : String(value).split(",");
+    const options = values.map((item) => findSelectOptionName(field, item)).filter((item): item is string => Boolean(item));
+    return options.length > 0 ? options.map((name) => ({ name })) : null;
+  }
+
+  return value;
+}
+
+function isTextFieldType(type: string): boolean {
+  return ["singleLineText", "multilineText", "richText", "email", "phoneNumber", "url"].includes(type);
+}
+
+function findSelectOptionName(field: AirtableFieldMetadata, value: unknown): string | null {
+  const requested = String(value).trim();
+  if (!requested) {
+    return null;
+  }
+
+  const choices = getSelectChoices(field.options);
+  const match = choices.find((choice) => choice === requested || choice.toLowerCase() === requested.toLowerCase());
+  return match ?? null;
+}
+
+function getSelectChoices(options: unknown): string[] {
+  if (typeof options !== "object" || options === null || !("choices" in options)) {
+    return [];
+  }
+
+  const choices = (options as { choices?: unknown }).choices;
+  if (!Array.isArray(choices)) {
+    return [];
+  }
+
+  return choices
+    .map((choice) => {
+      if (typeof choice !== "object" || choice === null || !("name" in choice)) {
+        return null;
+      }
+
+      const name = (choice as { name?: unknown }).name;
+      return typeof name === "string" ? name : null;
+    })
+    .filter((name): name is string => Boolean(name));
 }
 
 function isWritableAirtableField(field: AirtableFieldMetadata): boolean {

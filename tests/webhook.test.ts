@@ -137,6 +137,29 @@ describe("POST /api/webhooks/hypeauditor", () => {
     expect(body.airtableStatus).toBe(422);
   });
 
+  it("returns 422 when an Instagram payload produces no usable parsed fields", async () => {
+    setInstagramEnv();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await postWebhook({
+      recordId: "recInstagram",
+      platform: "instagram",
+      hypeauditorData: { result: { report_state: "READY", report: { basic: {}, metrics: {}, features: {} } } },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({
+      success: false,
+      error: "Parsed Instagram payload produced no usable fields",
+      debug: {
+        reportPath: "result.report",
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("dry-run returns normalized and mapped fields without calling Airtable", async () => {
     setTikTokEnv();
     process.env.WEBHOOK_SECRET = "test-secret";
