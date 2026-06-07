@@ -17,6 +17,19 @@ type AirtableBase = {
   name: string;
 };
 
+type AirtableFieldMetadata = {
+  id: string;
+  name: string;
+  type: string;
+  options?: unknown;
+};
+
+type AirtableTableMetadata = {
+  id: string;
+  name: string;
+  fields: AirtableFieldMetadata[];
+};
+
 export async function GET(request: NextRequest) {
   const secret = process.env.WEBHOOK_SECRET;
   if (secret && request.headers.get("x-webhook-secret") !== secret) {
@@ -94,7 +107,12 @@ async function checkTables(apiKey: string | undefined, target: AirtableTarget) {
     status: response.status,
     tableFound: Boolean(matchingTable),
     tableName: matchingTable?.name ?? null,
-    availableTables: tables.map((table) => ({ id: table.id, name: table.name })),
+    configuredTableFields: matchingTable?.fields ?? [],
+    availableTables: tables.map((table) => ({
+      id: table.id,
+      name: table.name,
+      fieldCount: table.fields.length,
+    })),
     error: response.ok ? null : body,
   };
 }
@@ -262,7 +280,7 @@ async function readResponseBody(response: Response): Promise<unknown> {
   }
 }
 
-function getTables(body: unknown): { id: string; name: string }[] {
+function getTables(body: unknown): AirtableTableMetadata[] {
   if (typeof body !== "object" || body === null || !("tables" in body)) {
     return [];
   }
@@ -272,18 +290,46 @@ function getTables(body: unknown): { id: string; name: string }[] {
     return [];
   }
 
-  return tables
-    .map((table) => {
-      if (typeof table !== "object" || table === null) {
-        return null;
-      }
+  const parsedTables: AirtableTableMetadata[] = [];
+  for (const table of tables) {
+    if (typeof table !== "object" || table === null) {
+      continue;
+    }
 
-      const id = (table as { id?: unknown }).id;
-      const name = (table as { name?: unknown }).name;
+    const id = (table as { id?: unknown }).id;
+    const name = (table as { name?: unknown }).name;
+    const fields = (table as { fields?: unknown }).fields;
 
-      return typeof id === "string" && typeof name === "string" ? { id, name } : null;
-    })
-    .filter((table): table is { id: string; name: string } => Boolean(table));
+    if (typeof id === "string" && typeof name === "string") {
+      parsedTables.push({ id, name, fields: getFields(fields) });
+    }
+  }
+
+  return parsedTables;
+}
+
+function getFields(fields: unknown): AirtableFieldMetadata[] {
+  if (!Array.isArray(fields)) {
+    return [];
+  }
+
+  const parsedFields: AirtableFieldMetadata[] = [];
+  for (const field of fields) {
+    if (typeof field !== "object" || field === null) {
+      continue;
+    }
+
+    const id = (field as { id?: unknown }).id;
+    const name = (field as { name?: unknown }).name;
+    const type = (field as { type?: unknown }).type;
+    const options = (field as { options?: unknown }).options;
+
+    if (typeof id === "string" && typeof name === "string" && typeof type === "string") {
+      parsedFields.push({ id, name, type, options });
+    }
+  }
+
+  return parsedFields;
 }
 
 function getBases(body: unknown): AirtableBase[] {
