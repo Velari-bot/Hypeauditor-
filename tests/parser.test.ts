@@ -47,6 +47,16 @@ describe("parseIncomingPayload", () => {
     expect(parseTikTok(parsed.raw).followers).toBe(124700000);
   });
 
+  it("accepts Zapier-style recordID casing", () => {
+    const parsed = parseIncomingPayload({
+      recordID: "recZapier123",
+      platform: "tiktok",
+      hypeauditorData: tiktokSample,
+    });
+
+    expect(parsed.recordId).toBe("recZapier123");
+  });
+
   it("supports the full HypeAuditor result directly as the body", () => {
     const parsed = parseIncomingPayload(tiktokSample);
 

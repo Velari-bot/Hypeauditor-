@@ -92,7 +92,11 @@ const THEMATIC_MAP: Record<string, string> = {
 export function parseIncomingPayload(reqBody: unknown): ParsedIncomingPayload {
   const body = parseJsonDeep(reqBody, "request body");
   const bodyObject = isRecord(body) ? body : {};
-  const recordId = toCleanString(bodyObject.recordId) ?? toCleanString(bodyObject.record_id);
+  const recordId =
+    toCleanString(bodyObject.recordId) ??
+    toCleanString(bodyObject.recordID) ??
+    toCleanString(bodyObject.record_id) ??
+    toCleanString(bodyObject.airtableRecordId);
   const platformValue = toCleanString(bodyObject.platform)?.toLowerCase();
   const platform = platformValue === "tiktok" || platformValue === "instagram" ? platformValue : null;
   const raw = findPayloadCandidate(bodyObject) ?? body;
