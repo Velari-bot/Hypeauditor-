@@ -11,6 +11,21 @@ type AirtableFieldConfig = {
 type AirtableTable = {
   id: string;
   name: string;
+  fields?: AirtableFieldMetadata[];
+};
+
+type AirtableFieldMetadata = {
+  id: string;
+  name: string;
+  type: string;
+  options?: unknown;
+};
+
+type SkippedAirtableField = {
+  airtableField: string;
+  normalizedKey?: string;
+  airtableType?: string;
+  reason: string;
 };
 
 type AirtableTarget = {
@@ -28,6 +43,7 @@ export type AirtableUpdateResult = {
   resolvedTableId: string;
   resolvedTableName: string | null;
   autoDiscoveryRan: boolean;
+  skippedFields: SkippedAirtableField[];
 };
 
 export const TIKTOK_AIRTABLE_FIELD_CONFIG: Record<string, AirtableFieldConfig> = {
@@ -92,6 +108,7 @@ export class AirtableUpdateError extends Error {
   resolvedTableId?: string | null;
   resolvedTableName?: string | null;
   autoDiscoveryRan?: boolean;
+  skippedFields?: SkippedAirtableField[];
 
   constructor(
     message: string,
@@ -103,6 +120,7 @@ export class AirtableUpdateError extends Error {
       resolvedTableId?: string | null;
       resolvedTableName?: string | null;
       autoDiscoveryRan?: boolean;
+      skippedFields?: SkippedAirtableField[];
     } = {},
   ) {
     super(message);
@@ -114,6 +132,7 @@ export class AirtableUpdateError extends Error {
     this.resolvedTableId = context.resolvedTableId;
     this.resolvedTableName = context.resolvedTableName;
     this.autoDiscoveryRan = context.autoDiscoveryRan;
+    this.skippedFields = context.skippedFields;
   }
 }
 
@@ -154,23 +173,27 @@ export async function updateAirtable({
   }
 
   const airtableFields = mapToAirtableFields(fields, platform);
-  console.log("Preparing Airtable update", {
+  const strictUpdates = process.env.STRICT_AIRTABLE_UPDATES === "true";
+  logPreparedUpdate({
     platform,
     recordId,
-    normalizedFieldKeys: Object.keys(fields),
-    mappedAirtableFields: previewAirtableFields(fields, platform, airtableFields),
+    fields,
+    airtableFields,
+    skippedFields: [],
   });
   const target = { apiKey, baseId, configuredTableId, initialTableId };
-  const firstAttempt = await patchRecord(target, recordId, airtableFields, initialTableId);
+  const firstSanitized = await sanitizeAirtableFields(target, platform, fields, airtableFields, initialTableId, strictUpdates);
+  const firstAttempt = await patchRecordSafely(target, recordId, firstSanitized.airtableFields, initialTableId, strictUpdates);
   if (firstAttempt.response.ok) {
     return buildUpdateResult({
-      airtableFields,
+      airtableFields: firstAttempt.airtableFields,
       responseBody: firstAttempt.body,
       configuredTableId,
       initialTableId,
       resolvedTableId: initialTableId,
       resolvedTableName: null,
       autoDiscoveryRan: false,
+      skippedFields: [...firstSanitized.skippedFields, ...firstAttempt.skippedFields],
     });
   }
 
@@ -192,6 +215,7 @@ export async function updateAirtable({
       resolvedTableId: initialTableId,
       resolvedTableName: null,
       autoDiscoveryRan: false,
+      skippedFields: [...firstSanitized.skippedFields, ...firstAttempt.skippedFields],
     });
   }
 
@@ -216,10 +240,12 @@ export async function updateAirtable({
       resolvedTableId: null,
       resolvedTableName: null,
       autoDiscoveryRan: true,
+      skippedFields: [...firstSanitized.skippedFields, ...firstAttempt.skippedFields],
     });
   }
 
-  const retry = await patchRecord(target, recordId, airtableFields, resolved.id);
+  const retrySanitized = await sanitizeAirtableFields(target, platform, fields, airtableFields, resolved.id, strictUpdates);
+  const retry = await patchRecordSafely(target, recordId, retrySanitized.airtableFields, resolved.id, strictUpdates);
   if (!retry.response.ok) {
     logAirtableFailure({
       status: retry.response.status,
@@ -238,17 +264,19 @@ export async function updateAirtable({
       resolvedTableId: resolved.id,
       resolvedTableName: resolved.name,
       autoDiscoveryRan: true,
+      skippedFields: [...firstSanitized.skippedFields, ...retrySanitized.skippedFields, ...retry.skippedFields],
     });
   }
 
   return buildUpdateResult({
-    airtableFields,
+    airtableFields: retry.airtableFields,
     responseBody: retry.body,
     configuredTableId,
     initialTableId,
     resolvedTableId: resolved.id,
     resolvedTableName: resolved.name,
     autoDiscoveryRan: true,
+    skippedFields: [...firstSanitized.skippedFields, ...retrySanitized.skippedFields, ...retry.skippedFields],
   });
 }
 
@@ -279,6 +307,105 @@ async function patchRecord(target: AirtableTarget, recordId: string, airtableFie
     response,
     body: await readResponseBody(response),
   };
+}
+
+async function patchRecordSafely(
+  target: AirtableTarget,
+  recordId: string,
+  airtableFields: NormalizedFields,
+  tableId: string,
+  strictUpdates: boolean,
+) {
+  const firstAttempt = await patchRecord(target, recordId, airtableFields, tableId);
+  if (firstAttempt.response.ok || strictUpdates) {
+    return { ...firstAttempt, airtableFields, skippedFields: [] as SkippedAirtableField[] };
+  }
+
+  const rejectedField = getRejectedFieldName(firstAttempt.body);
+  if (!rejectedField || !(rejectedField in airtableFields)) {
+    return { ...firstAttempt, airtableFields, skippedFields: [] as SkippedAirtableField[] };
+  }
+
+  const retryFields = { ...airtableFields };
+  delete retryFields[rejectedField];
+  const skippedFields = [
+    {
+      airtableField: rejectedField,
+      reason: "Airtable rejected this field value; retried without it.",
+    },
+  ];
+  console.warn("Retrying Airtable update without rejected field", {
+    recordId,
+    tableId,
+    skippedFields,
+  });
+
+  const retry = await patchRecord(target, recordId, retryFields, tableId);
+  return {
+    ...retry,
+    airtableFields: retryFields,
+    skippedFields,
+  };
+}
+
+async function sanitizeAirtableFields(
+  target: AirtableTarget,
+  platform: Platform,
+  normalizedFields: NormalizedFields,
+  airtableFields: NormalizedFields,
+  tableId: string,
+  strictUpdates: boolean,
+) {
+  const metadata = await fetchTableMetadata(target, tableId);
+  if (!metadata) {
+    return { airtableFields, skippedFields: [] as SkippedAirtableField[] };
+  }
+
+  const config = platform === "tiktok" ? TIKTOK_AIRTABLE_FIELD_CONFIG : INSTAGRAM_AIRTABLE_FIELD_CONFIG;
+  const fields = { ...airtableFields };
+  const skippedFields: SkippedAirtableField[] = [];
+
+  for (const [normalizedKey, fieldConfig] of Object.entries(config)) {
+    if (!(normalizedKey in normalizedFields) || !(fieldConfig.airtableField in fields)) {
+      continue;
+    }
+
+    const field = (metadata.fields ?? []).find((item) => item.name === fieldConfig.airtableField);
+    if (!field) {
+      continue;
+    }
+
+    if (!isWritableAirtableField(field)) {
+      const skipped = {
+        normalizedKey,
+        airtableField: fieldConfig.airtableField,
+        airtableType: field.type,
+        reason: "Airtable field is not writable.",
+      };
+
+      if (strictUpdates) {
+        throw new AirtableUpdateError(`Airtable field "${fieldConfig.airtableField}" is not writable.`, 422, { error: skipped });
+      }
+
+      delete fields[fieldConfig.airtableField];
+      skippedFields.push(skipped);
+    }
+  }
+
+  if (skippedFields.length > 0) {
+    console.warn("Skipping non-writable Airtable fields", {
+      platform,
+      tableId,
+      skippedFields,
+    });
+  }
+
+  return { airtableFields: fields, skippedFields };
+}
+
+async function fetchTableMetadata(target: AirtableTarget, tableId: string) {
+  const tables = await fetchTables(target);
+  return tables.find((table) => table.id === tableId) ?? null;
 }
 
 async function resolveRecordTable(target: AirtableTarget, recordId: string, skippedTableId: string): Promise<AirtableTable | null> {
@@ -366,17 +493,45 @@ function getTables(body: unknown): AirtableTable[] {
     return [];
   }
 
-  return tables
-    .map((table) => {
-      if (typeof table !== "object" || table === null) {
-        return null;
-      }
+  const parsedTables: AirtableTable[] = [];
+  for (const table of tables) {
+    if (typeof table !== "object" || table === null) {
+      continue;
+    }
 
-      const id = (table as { id?: unknown }).id;
-      const name = (table as { name?: unknown }).name;
-      return typeof id === "string" && typeof name === "string" ? { id, name } : null;
-    })
-    .filter((table): table is AirtableTable => Boolean(table));
+    const id = (table as { id?: unknown }).id;
+    const name = (table as { name?: unknown }).name;
+    const fields = (table as { fields?: unknown }).fields;
+    if (typeof id === "string" && typeof name === "string") {
+      parsedTables.push({ id, name, fields: getFields(fields) });
+    }
+  }
+
+  return parsedTables;
+}
+
+function getFields(fields: unknown): AirtableFieldMetadata[] {
+  if (!Array.isArray(fields)) {
+    return [];
+  }
+
+  const parsedFields: AirtableFieldMetadata[] = [];
+  for (const field of fields) {
+    if (typeof field !== "object" || field === null) {
+      continue;
+    }
+
+    const id = (field as { id?: unknown }).id;
+    const name = (field as { name?: unknown }).name;
+    const type = (field as { type?: unknown }).type;
+    const options = (field as { options?: unknown }).options;
+
+    if (typeof id === "string" && typeof name === "string" && typeof type === "string") {
+      parsedFields.push({ id, name, type, options });
+    }
+  }
+
+  return parsedFields;
 }
 
 function isModelNotFound(responseBody: unknown): boolean {
@@ -427,6 +582,28 @@ function logAirtableFailure({
   });
 }
 
+function logPreparedUpdate({
+  platform,
+  recordId,
+  fields,
+  airtableFields,
+  skippedFields,
+}: {
+  platform: Platform;
+  recordId: string;
+  fields: NormalizedFields;
+  airtableFields: NormalizedFields;
+  skippedFields: SkippedAirtableField[];
+}) {
+  console.log("Preparing Airtable update", {
+    platform,
+    recordId,
+    normalizedFieldKeys: Object.keys(fields),
+    mappedAirtableFields: previewAirtableFields(fields, platform, airtableFields),
+    skippedFields,
+  });
+}
+
 function coerceForAirtable(value: unknown, type: AirtableValueType): unknown {
   if (value === undefined) {
     return undefined;
@@ -451,6 +628,41 @@ function coerceForAirtable(value: unknown, type: AirtableValueType): unknown {
   }
 
   return value;
+}
+
+function isWritableAirtableField(field: AirtableFieldMetadata): boolean {
+  const nonWritableTypes = new Set([
+    "formula",
+    "rollup",
+    "lookup",
+    "count",
+    "autoNumber",
+    "createdTime",
+    "lastModifiedTime",
+    "createdBy",
+    "lastModifiedBy",
+    "button",
+    "externalSyncSource",
+    "syncSource",
+    "multipleLookupValues",
+  ]);
+
+  return !nonWritableTypes.has(field.type);
+}
+
+function getRejectedFieldName(responseBody: unknown): string | null {
+  const message = getAirtableErrorMessage(responseBody);
+  const cannotAcceptMatch = message.match(/Field "([^"]+)" cannot accept the provided value/i);
+  if (cannotAcceptMatch?.[1]) {
+    return cannotAcceptMatch[1];
+  }
+
+  const invalidDateMatch = message.match(/for field ([^"]+)$/i);
+  if (invalidDateMatch?.[1]) {
+    return invalidDateMatch[1].trim();
+  }
+
+  return null;
 }
 
 function previewAirtableFields(fields: NormalizedFields, platform: Platform, airtableFields: NormalizedFields) {

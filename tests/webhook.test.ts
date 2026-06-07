@@ -42,7 +42,7 @@ describe("POST /api/webhooks/hypeauditor", () => {
       resolvedTableName: null,
       autoDiscoveryRan: false,
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("returns 200 and success true for a valid Instagram payload", async () => {
@@ -68,7 +68,7 @@ describe("POST /api/webhooks/hypeauditor", () => {
       },
     });
     expect(body.updatedFields).toContain("Instagram Username");
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("returns 400 when recordId is missing", async () => {
@@ -119,7 +119,10 @@ describe("POST /api/webhooks/hypeauditor", () => {
     setTikTokEnv();
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ error: { message: "Bad Airtable request" } }), { status: 422 })),
+      vi
+        .fn()
+        .mockResolvedValueOnce(tablesResponse([{ id: "table", name: "Link" }]))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "Bad Airtable request" } }), { status: 422 })),
     );
 
     const response = await postWebhook({
@@ -193,7 +196,8 @@ describe("POST /api/webhooks/hypeauditor", () => {
       initialTableId: "overrideTable",
       resolvedTableId: "overrideTable",
     });
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       "https://api.airtable.com/v0/base/overrideTable/recTiktok",
       expect.objectContaining({ method: "PATCH" }),
     );
@@ -232,7 +236,14 @@ function setInstagramEnv() {
 }
 
 function mockAirtableSuccess() {
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "rec123" }), { status: 200 }));
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(tablesResponse([{ id: "table", name: "Link" }, { id: "overrideTable", name: "Override" }]))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ id: "rec123" }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function tablesResponse(tables: Array<{ id: string; name: string }>) {
+  return new Response(JSON.stringify({ tables }), { status: 200 });
 }

@@ -127,6 +127,7 @@ export async function POST(request: NextRequest) {
         resolvedTableName: updateResult.resolvedTableName,
         autoDiscoveryRan: updateResult.autoDiscoveryRan,
       },
+      skippedFields: updateResult.skippedFields,
       warnings,
       parsed: normalized,
     });
@@ -144,6 +145,7 @@ export async function POST(request: NextRequest) {
             resolvedTableName: error.resolvedTableName ?? null,
             autoDiscoveryRan: error.autoDiscoveryRan ?? false,
           },
+          skippedFields: error.skippedFields ?? [],
         },
         { status: 500 },
       );

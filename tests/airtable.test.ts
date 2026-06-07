@@ -100,7 +100,7 @@ describe("mapToAirtableFields", () => {
     process.env.AIRTABLE_API_KEY = "key";
     process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
     process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "rec123" }), { status: 200 }));
+    const fetchMock = vi.fn().mockResolvedValueOnce(tablesResponse([{ id: "table", name: "Link" }])).mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await updateAirtable({
@@ -113,8 +113,9 @@ describe("mapToAirtableFields", () => {
       },
     });
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       "https://api.airtable.com/v0/base/table/rec123",
       expect.objectContaining({
         method: "PATCH",
@@ -132,7 +133,10 @@ describe("mapToAirtableFields", () => {
     process.env.AIRTABLE_API_KEY = "key";
     process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
     process.env.TIKTOK_AIRTABLE_TABLE_ID = "configuredTable";
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ id: "rec123" }), { status: 200 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(tablesResponse([{ id: "configuredTable", name: "Link" }])).mockResolvedValueOnce(jsonResponse({ id: "rec123" })),
+    );
 
     const result = await updateAirtable({
       platform: "tiktok",
@@ -155,16 +159,16 @@ describe("mapToAirtableFields", () => {
     process.env.TIKTOK_AIRTABLE_TABLE_ID = "configuredTable";
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(tablesResponse([{ id: "configuredTable", name: "Link" }]))
       .mockResolvedValueOnce(modelNotFoundResponse())
       .mockResolvedValueOnce(
-        jsonResponse({
-          tables: [
-            { id: "configuredTable", name: "Link" },
-            { id: "ownerTable", name: "Creators" },
-          ],
-        }),
+        tablesResponse([
+          { id: "configuredTable", name: "Link" },
+          { id: "ownerTable", name: "Creators" },
+        ]),
       )
       .mockResolvedValueOnce(jsonResponse({ id: "rec123" }))
+      .mockResolvedValueOnce(tablesResponse([{ id: "ownerTable", name: "Creators" }]))
       .mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -182,7 +186,7 @@ describe("mapToAirtableFields", () => {
       autoDiscoveryRan: true,
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      6,
       "https://api.airtable.com/v0/base/ownerTable/rec123",
       expect.objectContaining({ method: "PATCH" }),
     );
@@ -194,14 +198,13 @@ describe("mapToAirtableFields", () => {
     process.env.TIKTOK_AIRTABLE_TABLE_ID = "configuredTable";
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(tablesResponse([{ id: "configuredTable", name: "Link" }]))
       .mockResolvedValueOnce(modelNotFoundResponse())
       .mockResolvedValueOnce(
-        jsonResponse({
-          tables: [
-            { id: "configuredTable", name: "Link" },
-            { id: "otherTable", name: "Creators" },
-          ],
-        }),
+        tablesResponse([
+          { id: "configuredTable", name: "Link" },
+          { id: "otherTable", name: "Creators" },
+        ]),
       )
       .mockResolvedValueOnce(modelNotFoundResponse());
     vi.stubGlobal("fetch", fetchMock);
@@ -219,7 +222,7 @@ describe("mapToAirtableFields", () => {
     process.env.AIRTABLE_API_KEY = "key";
     process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
     process.env.TIKTOK_AIRTABLE_TABLE_ID = "configuredTable";
-    const fetchMock = vi.fn(async () => jsonResponse({ id: "rec123" }));
+    const fetchMock = vi.fn().mockResolvedValueOnce(tablesResponse([{ id: "overrideTable", name: "Override" }])).mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await updateAirtable({
@@ -231,15 +234,129 @@ describe("mapToAirtableFields", () => {
 
     expect(result.initialTableId).toBe("overrideTable");
     expect(result.resolvedTableId).toBe("overrideTable");
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       "https://api.airtable.com/v0/base/overrideTable/rec123",
       expect.objectContaining({ method: "PATCH" }),
     );
+  });
+
+  it("skips non-writable Airtable fields before PATCH", async () => {
+    process.env.AIRTABLE_API_KEY = "key";
+    process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
+    process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        tablesResponse([
+          {
+            id: "table",
+            name: "Link",
+            fields: [
+              { id: "fldUsername", name: "Tiktok Username", type: "singleLineText" },
+              { id: "fldFollowers", name: "Followers", type: "formula" },
+            ],
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateAirtable({
+      platform: "tiktok",
+      recordId: "rec123",
+      fields: { tiktok_username: "mrbeast", followers: 124700000 },
+    });
+
+    expect(result.airtableFields).toEqual({ "Tiktok Username": "mrbeast" });
+    expect(result.skippedFields).toMatchObject([{ airtableField: "Followers", airtableType: "formula" }]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.airtable.com/v0/base/table/rec123",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ fields: { "Tiktok Username": "mrbeast" } }),
+      }),
+    );
+  });
+
+  it("retries once without a field Airtable rejects", async () => {
+    process.env.AIRTABLE_API_KEY = "key";
+    process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
+    process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(tablesResponse([{ id: "table", name: "Link" }]))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              type: "INVALID_VALUE_FOR_COLUMN",
+              message: 'Field "Followers" cannot accept the provided value',
+            },
+          },
+          422,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: "rec123" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateAirtable({
+      platform: "tiktok",
+      recordId: "rec123",
+      fields: { tiktok_username: "mrbeast", followers: 124700000 },
+    });
+
+    expect(result.airtableFields).toEqual({ "Tiktok Username": "mrbeast" });
+    expect(result.skippedFields).toEqual([
+      {
+        airtableField: "Followers",
+        reason: "Airtable rejected this field value; retried without it.",
+      },
+    ]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://api.airtable.com/v0/base/table/rec123",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ fields: { "Tiktok Username": "mrbeast" } }),
+      }),
+    );
+  });
+
+  it("fails on non-writable Airtable fields when strict updates are enabled", async () => {
+    process.env.AIRTABLE_API_KEY = "key";
+    process.env.TIKTOK_AIRTABLE_BASE_ID = "base";
+    process.env.TIKTOK_AIRTABLE_TABLE_ID = "table";
+    process.env.STRICT_AIRTABLE_UPDATES = "true";
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      tablesResponse([
+        {
+          id: "table",
+          name: "Link",
+          fields: [{ id: "fldFollowers", name: "Followers", type: "formula" }],
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateAirtable({
+        platform: "tiktok",
+        recordId: "rec123",
+        fields: { followers: 124700000 },
+      }),
+    ).rejects.toThrow('Airtable field "Followers" is not writable.');
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
+}
+
+function tablesResponse(tables: Array<{ id: string; name: string; fields?: Array<{ id: string; name: string; type: string }> }>) {
+  return jsonResponse({ tables });
 }
 
 function modelNotFoundResponse() {
